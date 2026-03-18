@@ -4,6 +4,9 @@ import OpenAI from 'openai';
 
 export type AiProvider = 'openai' | 'bailian' | 'local';
 
+/** 百炼默认模型（千问 3.5 Plus） */
+export const BAILIAN_DEFAULT_MODEL = 'qwen3.5-plus';
+
 export interface AiCompleteOptions {
   model: string;
   systemPrompt?: string;
@@ -13,21 +16,26 @@ export interface AiCompleteOptions {
 }
 
 /**
- * AI 提供商抽象：OpenAI 已实现，百炼/本地为占位。
- * AI 节点执行时带简单重试（可配置次数与 backoff）。
+ * AI 提供商抽象：OpenAI、百炼（DashScope）已实现；本地为占位。
+ * 默认使用百炼 qwen3.5-plus。AI 节点执行时带简单重试。
  */
 @Injectable()
 export class AiService {
   private openai: OpenAI | null = null;
+  private bailianApiKey: string | null = null;
+  private bailianBaseUrl = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 
   constructor(private readonly config: ConfigService) {
     const apiKey = this.config.get<string>('OPENAI_API_KEY');
     if (apiKey) this.openai = new OpenAI({ apiKey });
+    const dashscopeKey = this.config.get<string>('DASHSCOPE_API_KEY');
+    if (dashscopeKey) this.bailianApiKey = dashscopeKey;
+    const baseUrl = this.config.get<string>('DASHSCOPE_BASE_URL');
+    if (baseUrl) this.bailianBaseUrl = baseUrl.replace(/\/$/, '');
   }
 
   /**
-   * 调用 LLM 完成对话。仅 OpenAI 实现；bailian/local 抛出说明性错误。
-   * 带重试：仅对可重试错误（速率限制、暂时故障）重试。
+   * 调用 LLM 完成对话。OpenAI、百炼已实现；local 为占位。带重试。
    */
   async complete(
     provider: AiProvider,
@@ -44,10 +52,51 @@ export class AiService {
         backoffMs,
       );
     }
-    if (provider === 'bailian' || provider === 'local') {
-      throw new Error(`AI 提供商 "${provider}" 尚未实现，请使用 openai 或后续接入百炼/本地模型`);
+    if (provider === 'bailian') {
+      return this.completeWithRetry(
+        () => this.completeBailian(messages, options),
+        maxRetries,
+        backoffMs,
+      );
+    }
+    if (provider === 'local') {
+      throw new Error('AI 提供商 "local" 尚未实现，请使用 openai 或 bailian');
     }
     throw new Error(`未知 AI 提供商: ${provider}`);
+  }
+
+  private async completeBailian(
+    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+    options: AiCompleteOptions,
+  ): Promise<string> {
+    if (!this.bailianApiKey) {
+      throw new Error('未配置 DASHSCOPE_API_KEY，无法调用百炼');
+    }
+    const model = options.model || BAILIAN_DEFAULT_MODEL;
+    const msgs = options.systemPrompt
+      ? [{ role: 'system' as const, content: options.systemPrompt }, ...messages]
+      : messages;
+
+    const res = await fetch(`${this.bailianBaseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.bailianApiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: msgs.map((m) => ({ role: m.role, content: m.content })),
+        max_tokens: 4096,
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`百炼 API 错误 ${res.status}: ${text}`);
+    }
+    const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const content = json.choices?.[0]?.message?.content;
+    if (content == null) throw new Error('百炼返回空内容');
+    return content;
   }
 
   private async completeOpenAI(

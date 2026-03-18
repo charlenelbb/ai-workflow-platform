@@ -238,7 +238,9 @@ export class ExecutionService {
         try {
           const aiData = (node.data || {}) as AINodeData;
           const provider = aiData.provider ?? 'openai';
-          const model = (aiData.model as string) || 'gpt-3.5-turbo';
+          const model =
+            (aiData.model as string) ||
+            (provider === 'bailian' ? 'qwen3.5-plus' : 'gpt-3.5-turbo');
           const systemPrompt = aiData.systemPrompt as string | undefined;
           const inputMapping = (aiData.inputMapping || {}) as Record<string, string>;
           const userContent = String(

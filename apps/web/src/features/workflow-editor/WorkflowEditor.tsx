@@ -17,6 +17,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import { nodeTypes } from './node-types';
 import { NodeConfigPanel } from '@/features/node-config/NodeConfigPanel';
+import { Button } from '@/components/ui/button';
 import type { NodeType, WorkflowGraph } from '@/types/workflow';
 
 const initialNodes: Node[] = [
@@ -27,7 +28,6 @@ const initialEdges: Edge[] = [{ id: 'e-start-end', source: 'start', target: 'end
 
 function graphToFlow(graph: WorkflowGraph | null): { nodes: Node[]; edges: Edge[] } {
   if (!graph?.nodes?.length) return { nodes: initialNodes, edges: initialEdges };
-  console.log('graph', graph);
   const nodes: Node[] = graph.nodes.map((n) => ({
     id: n.id,
     type: (n.type as string) in nodeTypes ? (n.type as keyof NodeTypes) : 'plain',
@@ -79,7 +79,6 @@ export function WorkflowEditor({
   onSave,
   onRun,
 }: WorkflowEditorProps) {
-  console.log('initialGraph', initialGraph);
   const { nodes: initN, edges: initE } = graphToFlow(initialGraph);
   const [nodes, setNodes, onNodesChange] = useNodesState(initN);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initE);
@@ -111,14 +110,14 @@ export function WorkflowEditor({
       const defaultData: Record<string, unknown> =
         type === 'plain'
           ? { label: '处理节点' }
-          : type === 'ai'
-            ? {
-                label: 'AI 节点',
-                provider: 'openai',
-                model: 'gpt-3.5-turbo',
-                systemPrompt: '',
-                inputMapping: { user: '{{inputs.message}}' },
-              }
+            : type === 'ai'
+              ? {
+                  label: 'AI 节点',
+                  provider: 'bailian',
+                  model: 'qwen3.5-plus',
+                  systemPrompt: '',
+                  inputMapping: { user: '{{inputs.message}}' },
+                }
             : type === 'input'
               ? {
                   label: '输入',
@@ -149,72 +148,36 @@ export function WorkflowEditor({
   }, [setNodes]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      <header
-        style={{
-          padding: '8px 16px',
-          borderBottom: '1px solid #e2e8f0',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-        }}
-      >
-        <span style={{ fontWeight: 600 }}>工作流编辑器</span>
-        <button
-          type="button"
-          onClick={() => addNode('start')}
-          style={{ padding: '6px 12px', cursor: 'pointer' }}
-        >
+    <div className="flex h-screen flex-col">
+      <header className="flex items-center gap-3 border-b border-border px-4 py-2">
+        <span className="font-semibold">工作流编辑器</span>
+        <Button type="button" variant="outline" size="sm" onClick={() => addNode('start')}>
           添加开始
-        </button>
-        <button
-          type="button"
-          onClick={() => addNode('plain')}
-          style={{ padding: '6px 12px', cursor: 'pointer' }}
-        >
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={() => addNode('plain')}>
           添加节点
-        </button>
-        <button
-          type="button"
-          onClick={() => addNode('input')}
-          style={{ padding: '6px 12px', cursor: 'pointer' }}
-        >
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={() => addNode('input')}>
           添加输入
-        </button>
-        <button
-          type="button"
-          onClick={() => addNode('ai')}
-          style={{ padding: '6px 12px', cursor: 'pointer' }}
-        >
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={() => addNode('ai')}>
           添加 AI 节点
-        </button>
-        <button
-          type="button"
-          onClick={() => addNode('output')}
-          style={{ padding: '6px 12px', cursor: 'pointer' }}
-        >
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={() => addNode('output')}>
           添加输出
-        </button>
-        <button
-          type="button"
-          onClick={() => addNode('end')}
-          style={{ padding: '6px 12px', cursor: 'pointer' }}
-        >
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={() => addNode('end')}>
           添加结束
-        </button>
+        </Button>
         {workflowId && (
           <>
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={saving}
-              style={{ padding: '6px 12px', cursor: saving ? 'wait' : 'pointer' }}
-            >
+            <Button type="button" variant="secondary" size="sm" onClick={handleSave} disabled={saving}>
               {saving ? '保存中…' : '保存'}
-            </button>
+            </Button>
             {onRun && (
-              <button
+              <Button
                 type="button"
+                size="sm"
                 onClick={async () => {
                   setRunning(true);
                   try {
@@ -224,16 +187,15 @@ export function WorkflowEditor({
                   }
                 }}
                 disabled={running}
-                style={{ padding: '6px 12px', cursor: running ? 'wait' : 'pointer' }}
               >
                 {running ? '运行中…' : '运行'}
-              </button>
+              </Button>
             )}
           </>
         )}
       </header>
-      <div style={{ flex: 1, display: 'flex' }}>
-        <div style={{ flex: 1 }}>
+      <div className="flex flex-1">
+        <div className="flex-1">
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -253,6 +215,7 @@ export function WorkflowEditor({
         {selectedNode && (
           <NodeConfigPanel
             node={selectedNode}
+            nodes={nodes}
             onUpdate={updateNodeData}
             onClose={() => setSelectedNodeId(null)}
           />

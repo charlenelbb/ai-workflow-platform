@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { WorkflowEditor } from '@/features/workflow-editor/WorkflowEditor';
 import {
   listWorkflows,
@@ -10,7 +10,9 @@ import {
   type WorkflowListItem,
 } from '@/api/client';
 import type { WorkflowGraph } from '@/types/workflow';
-import { useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
 
 const defaultGraph: WorkflowGraph = {
   nodes: [
@@ -49,7 +51,6 @@ export default function App() {
     try {
       setUiError(null);
       const w = await getWorkflow(id);
-      console.log('w', w);
       setCurrent(w);
       setRunResult(null);
     } catch (e) {
@@ -116,108 +117,54 @@ export default function App() {
     }
   }, [current, runInputsText, handleRun]);
 
-  if (loading) return <div style={{ padding: 24 }}>加载中…</div>;
+  if (loading) return <div className="p-6">加载中…</div>;
 
   return (
-    <div style={{ display: 'flex', height: '100vh' }}>
-      <aside
-        style={{
-          width: 260,
-          borderRight: '1px solid #e2e8f0',
-          padding: 16,
-          overflow: 'auto',
-        }}
-      >
+    <div className="flex h-screen">
+      <aside className="flex w-[260px] flex-col overflow-auto border-r border-border p-4">
         {uiError && (
-          <div
-            style={{
-              marginBottom: 12,
-              padding: 10,
-              borderRadius: 8,
-              background: 'rgba(239,68,68,0.12)',
-              border: '1px solid rgba(239,68,68,0.35)',
-              color: '#991b1b',
-              fontSize: 12,
-              whiteSpace: 'pre-wrap',
-            }}
-          >
+          <div className="mb-3 rounded-lg border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-destructive whitespace-pre-wrap">
             {uiError}
           </div>
         )}
-        <button
-          type="button"
-          onClick={newWorkflow}
-          style={{
-            width: '100%',
-            padding: '10px 16px',
-            marginBottom: 12,
-            cursor: 'pointer',
-            fontWeight: 600,
-          }}
-        >
+        <Button type="button" className="mb-3 w-full font-semibold" onClick={newWorkflow}>
           + 新建工作流
-        </button>
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+        </Button>
+        <ul className="m-0 list-none p-0">
           {workflows.map((w) => (
             <li key={w.id}>
-              <button
+              <Button
                 type="button"
+                variant={current?.id === w.id ? 'secondary' : 'ghost'}
+                className="w-full justify-start"
                 onClick={() => openWorkflow(w.id)}
-                style={{
-                  width: '100%',
-                  padding: '8px 12px',
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  background: current?.id === w.id ? '#e0e7ff' : 'transparent',
-                  border: 'none',
-                  borderRadius: 6,
-                }}
               >
                 {w.name}
-              </button>
+              </Button>
             </li>
           ))}
         </ul>
 
-        <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #e2e8f0' }}>
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>运行输入（JSON）</div>
-          <textarea
+        <div className="mt-4 border-t border-border pt-4">
+          <Label className="mb-2 block font-semibold">运行输入（JSON）</Label>
+          <Textarea
             value={runInputsText}
             onChange={(e) => setRunInputsText(e.target.value)}
             placeholder='{"message":"hello"}'
             rows={6}
-            style={{
-              width: '100%',
-              padding: 8,
-              border: '1px solid #e2e8f0',
-              borderRadius: 6,
-              fontFamily: 'monospace',
-              fontSize: 12,
-              resize: 'vertical',
-              boxSizing: 'border-box',
-            }}
+            className="font-mono text-xs resize-y"
           />
-          <button
+          <Button
             type="button"
+            className="mt-2.5 w-full font-semibold"
             onClick={runWithEditorInputs}
             disabled={!current?.id}
-            style={{
-              width: '100%',
-              padding: '10px 16px',
-              marginTop: 10,
-              cursor: current?.id ? 'pointer' : 'not-allowed',
-              fontWeight: 600,
-              background: current?.id ? '#6366f1' : '#c7d2fe',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 8,
-            }}
           >
             运行当前工作流
-          </button>
+          </Button>
         </div>
       </aside>
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <main className="flex min-w-0 flex-1 flex-col">
         <WorkflowEditor
           key={current?.id ?? 'new'}
           workflowId={current?.id ?? null}
@@ -226,57 +173,36 @@ export default function App() {
           onRun={current ? runWithEditorInputs : undefined}
         />
         {runResult != null && (
-          <div
-            style={{
-              position: 'fixed',
-              bottom: 0,
-              left: 260,
-              right: 0,
-              maxHeight: 320,
-              overflow: 'auto',
-              background: '#1e293b',
-              color: '#e2e8f0',
-              padding: 16,
-              fontFamily: 'monospace',
-              fontSize: 12,
-            }}
-          >
+          <div className="fixed bottom-0 left-[260px] right-0 z-10 max-h-80 overflow-auto bg-card border-t border-border p-4 font-mono text-xs text-foreground">
             <strong>运行结果</strong>
             {runResult && typeof runResult === 'object' && 'nodeLogs' in runResult && Array.isArray((runResult as { nodeLogs?: unknown }).nodeLogs) && (
-              <div style={{ marginTop: 12 }}>
-                <div style={{ marginBottom: 8, fontWeight: 600 }}>节点日志</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className="mt-3">
+                <div className="mb-2 font-semibold">节点日志</div>
+                <div className="flex flex-col gap-2">
                   {((runResult as { nodeLogs: Array<{ nodeId: string; status: string; input?: unknown; output?: unknown; error?: string }> }).nodeLogs).map((log, i) => (
                     <div
                       key={i}
-                      style={{
-                        padding: 10,
-                        background: log.status === 'failed' ? 'rgba(239,68,68,0.2)' : 'rgba(30,41,59,0.8)',
-                        borderRadius: 6,
-                        border: '1px solid #334155',
-                      }}
+                      className={`rounded-md border p-2.5 ${log.status === 'failed' ? 'border-destructive/40 bg-destructive/10' : 'border-border bg-muted/50'}`}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                        <span style={{ fontWeight: 600 }}>{log.nodeId}</span>
-                        <span style={{ color: log.status === 'failed' ? '#f87171' : '#86efac' }}>
+                      <div className="mb-1.5 flex items-center gap-2">
+                        <span className="font-semibold">{log.nodeId}</span>
+                        <span className={log.status === 'failed' ? 'text-destructive' : 'text-green-600'}>
                           {log.status}
                         </span>
                       </div>
-                      {log.error && (
-                        <div style={{ color: '#f87171', marginBottom: 4 }}>{log.error}</div>
-                      )}
+                      {log.error && <div className="mb-1 text-destructive">{log.error}</div>}
                       {log.input != null && Object.keys(log.input as object).length > 0 && (
-                        <details style={{ marginBottom: 4 }}>
-                          <summary style={{ cursor: 'pointer' }}>输入</summary>
-                          <pre style={{ margin: '4px 0 0', whiteSpace: 'pre-wrap', fontSize: 11 }}>
+                        <details className="mb-1">
+                          <summary className="cursor-pointer">输入</summary>
+                          <pre className="mt-1 whitespace-pre-wrap text-[11px]">
                             {JSON.stringify(log.input, null, 2)}
                           </pre>
                         </details>
                       )}
                       {log.output != null && Object.keys(log.output as object).length > 0 && (
                         <details>
-                          <summary style={{ cursor: 'pointer' }}>输出</summary>
-                          <pre style={{ margin: '4px 0 0', whiteSpace: 'pre-wrap', fontSize: 11 }}>
+                          <summary className="cursor-pointer">输出</summary>
+                          <pre className="mt-1 whitespace-pre-wrap text-[11px]">
                             {JSON.stringify(log.output, null, 2)}
                           </pre>
                         </details>
@@ -286,11 +212,9 @@ export default function App() {
                 </div>
               </div>
             )}
-            <details style={{ marginTop: 12 }}>
-              <summary style={{ cursor: 'pointer' }}>原始 JSON</summary>
-              <pre style={{ margin: '8px 0 0', whiteSpace: 'pre-wrap' }}>
-                {JSON.stringify(runResult, null, 2)}
-              </pre>
+            <details className="mt-3">
+              <summary className="cursor-pointer">原始 JSON</summary>
+              <pre className="mt-2 whitespace-pre-wrap">{JSON.stringify(runResult, null, 2)}</pre>
             </details>
           </div>
         )}
