@@ -1,0 +1,89 @@
+const BASE = '/api';
+
+export async function listWorkflows(projectId?: string): Promise<WorkflowListItem[]> {
+  const url = projectId ? `${BASE}/workflows?projectId=${projectId}` : `${BASE}/workflows`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getWorkflow(id: string): Promise<WorkflowDetail> {
+  const res = await fetch(`${BASE}/workflows/${id}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function createWorkflow(body: CreateWorkflowBody): Promise<WorkflowDetail> {
+  const res = await fetch(`${BASE}/workflows`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function updateWorkflow(
+  id: string,
+  body: UpdateWorkflowBody,
+): Promise<WorkflowDetail> {
+  const res = await fetch(`${BASE}/workflows/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function deleteWorkflow(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/workflows/${id}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(await res.text());
+}
+
+export async function startRun(workflowId: string, inputs?: Record<string, unknown>) {
+  const res = await fetch(`${BASE}/runs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ workflowId, inputs: inputs ?? {} }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getRun(runId: string) {
+  const res = await fetch(`${BASE}/runs/${runId}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// 类型占位，与后端返回结构一致
+export interface WorkflowListItem {
+  id: string;
+  name: string;
+  description?: string | null;
+  version: number;
+  updatedAt: string;
+}
+
+export interface WorkflowDetail {
+  id: string;
+  name: string;
+  description?: string | null;
+  version: number;
+  graph: { nodes: unknown[]; edges: unknown[] };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateWorkflowBody {
+  name: string;
+  description?: string;
+  graph: { nodes: unknown[]; edges: unknown[] };
+}
+
+export interface UpdateWorkflowBody {
+  name?: string;
+  description?: string;
+  graph?: { nodes: unknown[]; edges: unknown[] };
+}

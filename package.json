@@ -1,0 +1,15 @@
+{
+  "name": "ai-workflow-platform",
+  "private": true,
+  "scripts": {
+    "dev:api": "npm run start:dev --workspace=api",
+    "dev:web": "npm run dev --workspace=web",
+    "build:api": "npm run build --workspace=api",
+    "build:web": "npm run build --workspace=web",
+    "postinstall": "cd apps/api && npx prisma generate"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}
