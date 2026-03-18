@@ -17,7 +17,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import { nodeTypes } from './node-types';
 import { NodeConfigPanel } from '@/features/node-config/NodeConfigPanel';
-import type { WorkflowGraph } from '@/types/workflow';
+import type { NodeType, WorkflowGraph } from '@/types/workflow';
 
 const initialNodes: Node[] = [
   { id: 'start', type: 'start', position: { x: 250, y: 0 }, data: {} },
@@ -27,6 +27,7 @@ const initialEdges: Edge[] = [{ id: 'e-start-end', source: 'start', target: 'end
 
 function graphToFlow(graph: WorkflowGraph | null): { nodes: Node[]; edges: Edge[] } {
   if (!graph?.nodes?.length) return { nodes: initialNodes, edges: initialEdges };
+  console.log('graph', graph);
   const nodes: Node[] = graph.nodes.map((n) => ({
     id: n.id,
     type: (n.type as string) in nodeTypes ? (n.type as keyof NodeTypes) : 'plain',
@@ -49,7 +50,7 @@ function flowToGraph(nodes: Node[], edges: Edge[]): WorkflowGraph {
   return {
     nodes: nodes.map((n) => ({
       id: n.id,
-      type: (n.type as string) || 'plain',
+      type: (((n.type as string) || 'plain') as NodeType),
       position: n.position,
       data: n.data ?? {},
       width: n.width,
@@ -78,6 +79,7 @@ export function WorkflowEditor({
   onSave,
   onRun,
 }: WorkflowEditorProps) {
+  console.log('initialGraph', initialGraph);
   const { nodes: initN, edges: initE } = graphToFlow(initialGraph);
   const [nodes, setNodes, onNodesChange] = useNodesState(initN);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initE);
@@ -103,7 +105,7 @@ export function WorkflowEditor({
   }, [workflowId, nodes, edges, onSave]);
 
   const addNode = useCallback(
-    (type: 'start' | 'end' | 'plain' | 'ai') => {
+    (type: 'start' | 'end' | 'plain' | 'ai' | 'input' | 'output') => {
       const id = `${type}-${Date.now()}`;
       const y = nodes.length * 120;
       const defaultData: Record<string, unknown> =
@@ -115,8 +117,18 @@ export function WorkflowEditor({
                 provider: 'openai',
                 model: 'gpt-3.5-turbo',
                 systemPrompt: '',
-                inputMapping: { user: '{{start}}' },
+                inputMapping: { user: '{{inputs.message}}' },
               }
+            : type === 'input'
+              ? {
+                  label: '输入',
+                  assignments: { message: '{{inputs.message}}' },
+                }
+              : type === 'output'
+                ? {
+                    label: '输出',
+                    outputMapping: { result: '{{inputs.message}}' },
+                  }
             : {};
       setNodes((nds) =>
         nds.concat({
@@ -164,10 +176,24 @@ export function WorkflowEditor({
         </button>
         <button
           type="button"
+          onClick={() => addNode('input')}
+          style={{ padding: '6px 12px', cursor: 'pointer' }}
+        >
+          添加输入
+        </button>
+        <button
+          type="button"
           onClick={() => addNode('ai')}
           style={{ padding: '6px 12px', cursor: 'pointer' }}
         >
           添加 AI 节点
+        </button>
+        <button
+          type="button"
+          onClick={() => addNode('output')}
+          style={{ padding: '6px 12px', cursor: 'pointer' }}
+        >
+          添加输出
         </button>
         <button
           type="button"

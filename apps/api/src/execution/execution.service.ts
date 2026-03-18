@@ -14,6 +14,14 @@ interface AINodeData {
   inputMapping?: Record<string, string>;
 }
 
+interface InputNodeData {
+  assignments?: Record<string, unknown>;
+}
+
+interface OutputNodeData {
+  outputMapping?: Record<string, unknown>;
+}
+
 interface NodeLogEntry {
   nodeId: string;
   startedAt: Date;
@@ -54,8 +62,11 @@ export class ExecutionService {
 
     const nodeLogs: NodeLogEntry[] = [];
     try {
-      const nodeOutputs = await this.executeGraph(graph, inputs, nodeLogs);
-      const outputs = this.collectOutputs(graph, nodeOutputs);
+      const { nodeOutputs, explicitOutputs } = await this.executeGraph(graph, inputs, nodeLogs);
+      const outputs =
+        explicitOutputs && Object.keys(explicitOutputs).length > 0
+          ? explicitOutputs
+          : this.collectOutputs(graph, nodeOutputs);
       const logsForDb = nodeLogs.map((l) => ({
         nodeId: l.nodeId,
         startedAt: l.startedAt.toISOString(),
@@ -108,10 +119,14 @@ export class ExecutionService {
     graph: WorkflowGraph,
     initialInputs: Record<string, unknown>,
     nodeLogs: NodeLogEntry[],
-  ): Promise<Record<string, { output: Record<string, unknown>; error?: string }>> {
+  ): Promise<{
+    nodeOutputs: Record<string, { output: Record<string, unknown>; error?: string }>;
+    explicitOutputs: Record<string, unknown>;
+  }> {
     const sorted = this.topologicalSort(graph);
     const nodeOutputs: Record<string, { output: Record<string, unknown>; error?: string }> = {};
-    const context: Record<string, unknown> = { ...initialInputs };
+    const context: Record<string, unknown> = { inputs: initialInputs, ...initialInputs };
+    const explicitOutputs: Record<string, unknown> = {};
 
     for (const nodeId of sorted) {
       const node = graph.nodes.find((n) => n.id === nodeId);
@@ -148,6 +163,77 @@ export class ExecutionService {
         continue;
       }
 
+      if (node.type === 'input') {
+        try {
+          const inData = (node.data || {}) as InputNodeData;
+          const assignments = (inData.assignments || {}) as Record<string, unknown>;
+          const output: Record<string, unknown> = {};
+          for (const [k, expr] of Object.entries(assignments)) {
+            output[k] = this.resolveValue(expr, context);
+          }
+          nodeOutputs[nodeId] = { output: output as Record<string, unknown> };
+          Object.assign(context, output);
+          Object.assign(context, { [nodeId]: output });
+          nodeLogs.push({
+            nodeId,
+            startedAt,
+            finishedAt: new Date(),
+            status: 'success',
+            input,
+            output: output as Record<string, unknown>,
+          });
+        } catch (e) {
+          const errMsg = e instanceof Error ? e.message : String(e);
+          nodeOutputs[nodeId] = { output: {}, error: errMsg };
+          nodeLogs.push({
+            nodeId,
+            startedAt,
+            finishedAt: new Date(),
+            status: 'failed',
+            input,
+            error: errMsg,
+          });
+          throw e;
+        }
+        continue;
+      }
+
+      if (node.type === 'output') {
+        try {
+          const outData = (node.data || {}) as OutputNodeData;
+          const mapping = (outData.outputMapping || {}) as Record<string, unknown>;
+          const out: Record<string, unknown> = {};
+          for (const [k, expr] of Object.entries(mapping)) {
+            const v = this.resolveValue(expr, context);
+            out[k] = v;
+            explicitOutputs[k] = v;
+          }
+          nodeOutputs[nodeId] = { output: out as Record<string, unknown> };
+          Object.assign(context, { [nodeId]: out });
+          nodeLogs.push({
+            nodeId,
+            startedAt,
+            finishedAt: new Date(),
+            status: 'success',
+            input,
+            output: out as Record<string, unknown>,
+          });
+        } catch (e) {
+          const errMsg = e instanceof Error ? e.message : String(e);
+          nodeOutputs[nodeId] = { output: {}, error: errMsg };
+          nodeLogs.push({
+            nodeId,
+            startedAt,
+            finishedAt: new Date(),
+            status: 'failed',
+            input,
+            error: errMsg,
+          });
+          throw e;
+        }
+        continue;
+      }
+
       if (node.type === 'ai') {
         try {
           const aiData = (node.data || {}) as AINodeData;
@@ -155,9 +241,11 @@ export class ExecutionService {
           const model = (aiData.model as string) || 'gpt-3.5-turbo';
           const systemPrompt = aiData.systemPrompt as string | undefined;
           const inputMapping = (aiData.inputMapping || {}) as Record<string, string>;
-          const userContent = this.resolveTemplate(
-            inputMapping['user'] ?? inputMapping['content'] ?? JSON.stringify(input),
-            context,
+          const userContent = String(
+            this.resolveValue(
+              inputMapping['user'] ?? inputMapping['content'] ?? JSON.stringify(input),
+              context,
+            ),
           );
           const messages = [{ role: 'user' as const, content: userContent }];
           const text = await this.aiService.complete(provider, messages, {
@@ -204,18 +292,32 @@ export class ExecutionService {
         output: input,
       });
     }
-    return nodeOutputs;
+    return { nodeOutputs, explicitOutputs };
   }
 
-  /** 将 {{key}} 或 {{key.sub}} 替换为 context 中的值 */
-  private resolveTemplate(template: string, context: Record<string, unknown>): string {
-    return template.replace(/\{\{([^}]+)\}\}/g, (_, path: string) => {
-      const keys = path.trim().split('.');
-      let v: unknown = context;
-      for (const k of keys) {
-        if (v == null || typeof v !== 'object') return '';
-        v = (v as Record<string, unknown>)[k];
-      }
+  private getByPath(context: Record<string, unknown>, path: string): unknown {
+    const keys = path.trim().split('.').filter(Boolean);
+    let v: unknown = context;
+    for (const k of keys) {
+      if (v == null || typeof v !== 'object') return undefined;
+      v = (v as Record<string, unknown>)[k];
+    }
+    return v;
+  }
+
+  /**
+   * 支持两种形式：
+   * - 若 expr 为字符串且完全等于 "{{path}}": 返回 path 对应的真实值（可为非字符串）
+   * - 其它字符串：做模板替换，返回字符串
+   * - 非字符串：原样返回
+   */
+  private resolveValue(expr: unknown, context: Record<string, unknown>): unknown {
+    if (typeof expr !== 'string') return expr;
+    const trimmed = expr.trim();
+    const exact = trimmed.match(/^\{\{([^}]+)\}\}$/);
+    if (exact) return this.getByPath(context, exact[1]);
+    return expr.replace(/\{\{([^}]+)\}\}/g, (_, path: string) => {
+      const v = this.getByPath(context, path);
       return v != null ? String(v) : '';
     });
   }

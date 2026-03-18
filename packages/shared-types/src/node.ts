@@ -4,6 +4,7 @@
 
 export type NodeType =
   | 'trigger'
+  | 'input'
   | 'ai'
   | 'http'
   | 'database'
@@ -11,6 +12,7 @@ export type NodeType =
   | 'condition_switch'
   | 'code'
   | 'aggregate'
+  | 'output'
   | 'start'
   | 'end'
   | 'plain';
@@ -27,6 +29,12 @@ export interface WorkflowNode {
   data: Record<string, unknown>;
   width?: number;
   height?: number;
+}
+
+/** 输入节点：从 run.inputs 读取并写入变量上下文 */
+export interface InputNodeData {
+  /** 变量赋值：key -> 模板或常量；支持 {{inputs.xxx}} / {{上游节点ID.xxx}} */
+  assignments: Record<string, unknown>;
 }
 
 /** AI 节点配置 */
@@ -57,4 +65,10 @@ export interface ConditionSwitchData {
   variable: string;
   cases: Array<{ value: string; outputKey: string }>;
   defaultOutput?: string;
+}
+
+/** 输出节点：从上下文中取值作为最终 outputs */
+export interface OutputNodeData {
+  /** 输出映射：outputKey -> 模板或常量 */
+  outputMapping: Record<string, unknown>;
 }

@@ -25,13 +25,17 @@ export default function App() {
   const [current, setCurrent] = useState<WorkflowDetail | null>(null);
   const [runResult, setRunResult] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
+  const [runInputsText, setRunInputsText] = useState<string>('{}');
+  const [uiError, setUiError] = useState<string | null>(null);
 
   const loadList = useCallback(async () => {
     try {
+      setUiError(null);
       const list = await listWorkflows();
       setWorkflows(list);
     } catch (e) {
-      console.error(e);
+      const msg = e instanceof Error ? e.message : String(e);
+      setUiError(`加载工作流列表失败：${msg}`);
     } finally {
       setLoading(false);
     }
@@ -42,19 +46,32 @@ export default function App() {
   }, [loadList]);
 
   const openWorkflow = useCallback(async (id: string) => {
-    const w = await getWorkflow(id);
-    setCurrent(w);
-    setRunResult(null);
+    try {
+      setUiError(null);
+      const w = await getWorkflow(id);
+      console.log('w', w);
+      setCurrent(w);
+      setRunResult(null);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setUiError(`打开工作流失败：${msg}`);
+    }
   }, []);
 
   const newWorkflow = useCallback(async () => {
-    const w = await createWorkflow({
-      name: `工作流 ${Date.now()}`,
-      graph: defaultGraph,
-    });
-    setWorkflows((prev) => [{ ...w, description: w.description ?? null }, ...prev]);
-    setCurrent(w);
-    setRunResult(null);
+    try {
+      setUiError(null);
+      const w = await createWorkflow({
+        name: `工作流 ${Date.now()}`,
+        graph: defaultGraph,
+      });
+      setWorkflows((prev) => [{ ...w, description: w.description ?? null }, ...prev]);
+      setCurrent(w);
+      setRunResult(null);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setUiError(`新建工作流失败：${msg}`);
+    }
   }, []);
 
   const handleSave = useCallback(
@@ -66,15 +83,38 @@ export default function App() {
     [current],
   );
 
-  const handleRun = useCallback(async () => {
+  const handleRun = useCallback(
+    async (inputs: Record<string, unknown>) => {
+      if (!current) return;
+      try {
+        setUiError(null);
+        const result = await startRun(current.id, inputs);
+        setRunResult(result);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setRunResult({ error: msg });
+        setUiError(`运行失败：${msg}`);
+      }
+    },
+    [current],
+  );
+
+  const runWithEditorInputs = useCallback(async () => {
     if (!current) return;
     try {
-      const result = await startRun(current.id, {});
-      setRunResult(result);
+      const parsed = JSON.parse(runInputsText || '{}');
+      if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        setRunResult({ error: '运行输入必须是 JSON 对象，例如：{"message":"hello"}' });
+        setUiError('运行输入必须是 JSON 对象，例如：{"message":"hello"}');
+        return;
+      }
+      await handleRun(parsed as Record<string, unknown>);
     } catch (e) {
-      setRunResult({ error: String(e) });
+      const msg = e instanceof Error ? e.message : String(e);
+      setRunResult({ error: `运行输入 JSON 解析失败: ${msg}` });
+      setUiError(`运行输入 JSON 解析失败: ${msg}`);
     }
-  }, [current]);
+  }, [current, runInputsText, handleRun]);
 
   if (loading) return <div style={{ padding: 24 }}>加载中…</div>;
 
@@ -88,6 +128,22 @@ export default function App() {
           overflow: 'auto',
         }}
       >
+        {uiError && (
+          <div
+            style={{
+              marginBottom: 12,
+              padding: 10,
+              borderRadius: 8,
+              background: 'rgba(239,68,68,0.12)',
+              border: '1px solid rgba(239,68,68,0.35)',
+              color: '#991b1b',
+              fontSize: 12,
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            {uiError}
+          </div>
+        )}
         <button
           type="button"
           onClick={newWorkflow}
@@ -122,6 +178,44 @@ export default function App() {
             </li>
           ))}
         </ul>
+
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #e2e8f0' }}>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>运行输入（JSON）</div>
+          <textarea
+            value={runInputsText}
+            onChange={(e) => setRunInputsText(e.target.value)}
+            placeholder='{"message":"hello"}'
+            rows={6}
+            style={{
+              width: '100%',
+              padding: 8,
+              border: '1px solid #e2e8f0',
+              borderRadius: 6,
+              fontFamily: 'monospace',
+              fontSize: 12,
+              resize: 'vertical',
+              boxSizing: 'border-box',
+            }}
+          />
+          <button
+            type="button"
+            onClick={runWithEditorInputs}
+            disabled={!current?.id}
+            style={{
+              width: '100%',
+              padding: '10px 16px',
+              marginTop: 10,
+              cursor: current?.id ? 'pointer' : 'not-allowed',
+              fontWeight: 600,
+              background: current?.id ? '#6366f1' : '#c7d2fe',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 8,
+            }}
+          >
+            运行当前工作流
+          </button>
+        </div>
       </aside>
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <WorkflowEditor
@@ -129,7 +223,7 @@ export default function App() {
           workflowId={current?.id ?? null}
           initialGraph={current ? (current.graph as WorkflowGraph) : null}
           onSave={handleSave}
-          onRun={current ? handleRun : undefined}
+          onRun={current ? runWithEditorInputs : undefined}
         />
         {runResult != null && (
           <div

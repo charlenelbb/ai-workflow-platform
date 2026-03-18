@@ -4,13 +4,15 @@
 
 export type NodeType =
   | 'trigger'
+  | 'input'
   | 'start'
   | 'end'
   | 'plain'
   | 'ai'
   | 'http'
   | 'condition_if'
-  | 'condition_switch';
+  | 'condition_switch'
+  | 'output';
 
 export interface WorkflowNode {
   id: string;
