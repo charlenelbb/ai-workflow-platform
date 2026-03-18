@@ -57,6 +57,12 @@ export async function getRun(runId: string) {
   return res.json();
 }
 
+export async function getRunsByWorkflow(workflowId: string, limit = 20) {
+  const res = await fetch(`${BASE}/runs/workflow/${workflowId}?limit=${limit}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 // 类型占位，与后端返回结构一致
 export interface WorkflowListItem {
   id: string;

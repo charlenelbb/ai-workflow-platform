@@ -1,4 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiService } from '../ai/ai.service';
 
@@ -66,6 +68,7 @@ export class ExecutionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly aiService: AiService,
+    @InjectQueue('workflow-execution') private readonly executionQueue: Queue,
   ) {}
 
   async startRun(workflowId: string, inputs: Record<string, unknown> = {}) {
@@ -74,18 +77,67 @@ export class ExecutionService {
     });
     if (!workflow) throw new NotFoundException('Workflow not found');
 
-    const graph = workflow.graph as unknown as WorkflowGraph;
     const run = await this.prisma.runRecord.create({
       data: {
         workflowId,
         workflowVersion: workflow.version,
-        status: 'running',
+        status: 'pending',
         inputs: inputs as object,
         startedAt: new Date(),
       },
     });
 
+    try {
+      await this.executionQueue.add('execute', { runId: run.id });
+      return {
+        runId: run.id,
+        status: 'pending' as const,
+        message: '运行已入队，请轮询 GET /runs/:runId 获取结果',
+      };
+    } catch { /* Redis/队列不可用时回退同步执行 */
+      await this.executeRunJob(run.id);
+      const updated = await this.prisma.runRecord.findUnique({
+        where: { id: run.id },
+      });
+      if (!updated) throw new NotFoundException('Run not found');
+      const nodeLogs = (updated.nodeLogs ?? []) as Array<{
+        nodeId: string;
+        status: string;
+        input?: unknown;
+        output?: unknown;
+        error?: string;
+      }>;
+      return {
+        runId: run.id,
+        status: updated.status as 'success' | 'failed',
+        outputs: updated.outputs ?? {},
+        nodeLogs,
+      };
+    }
+  }
+
+  /** Worker 调用：执行指定 run 并更新 DB */
+  async executeRunJob(runId: string): Promise<void> {
+    const run = await this.prisma.runRecord.findUnique({
+      where: { id: runId },
+    });
+    if (!run) throw new NotFoundException('Run not found');
+    if (run.status !== 'pending' && run.status !== 'running') return;
+
+    const workflow = await this.prisma.workflow.findUnique({
+      where: { id: run.workflowId },
+    });
+    if (!workflow) throw new NotFoundException('Workflow not found');
+
+    const graph = workflow.graph as unknown as WorkflowGraph;
+    const inputs = (run.inputs ?? {}) as Record<string, unknown>;
     const nodeLogs: NodeLogEntry[] = [];
+
+    await this.prisma.runRecord.update({
+      where: { id: runId },
+      data: { status: 'running' },
+    });
+
     try {
       const { nodeOutputs, explicitOutputs } = await this.executeGraph(graph, inputs, nodeLogs);
       const outputs =
@@ -102,7 +154,7 @@ export class ExecutionService {
         error: l.error,
       }));
       await this.prisma.runRecord.update({
-        where: { id: run.id },
+        where: { id: runId },
         data: {
           status: 'success',
           outputs: outputs as object,
@@ -110,12 +162,6 @@ export class ExecutionService {
           finishedAt: new Date(),
         },
       });
-      return {
-        runId: run.id,
-        status: 'success' as const,
-        outputs,
-        nodeLogs: logsForDb,
-      };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const logsForDb = nodeLogs.map((l) => ({
@@ -128,7 +174,7 @@ export class ExecutionService {
         error: l.error,
       }));
       await this.prisma.runRecord.update({
-        where: { id: run.id },
+        where: { id: runId },
         data: {
           status: 'failed',
           error: message,

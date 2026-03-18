@@ -6,6 +6,8 @@ import {
   createWorkflow,
   updateWorkflow,
   startRun,
+  getRun,
+  getRunsByWorkflow,
   type WorkflowDetail,
   type WorkflowListItem,
 } from '@/api/client';
@@ -31,10 +33,12 @@ export default function App() {
   const [workflows, setWorkflows] = useState<WorkflowListItem[]>([]);
   const [current, setCurrent] = useState<WorkflowDetail | null>(null);
   const [runResult, setRunResult] = useState<unknown>(null);
+  const [runHistory, setRunHistory] = useState<Array<{ id: string; status: string; startedAt: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [runInputsText, setRunInputsText] = useState<string>('{}');
   const [uiError, setUiError] = useState<string | null>(null);
   const [activeRunTab, setActiveRunTab] = useState<'logs' | 'outputs' | 'raw'>('logs');
+  const [runPolling, setRunPolling] = useState(false);
 
   const loadList = useCallback(async () => {
     try {
@@ -59,6 +63,14 @@ export default function App() {
       const w = await getWorkflow(id);
       setCurrent(w);
       setRunResult(null);
+      const runs = await getRunsByWorkflow(id, 20);
+      setRunHistory(
+        (runs as Array<{ id: string; status: string; startedAt: string }>).map((r) => ({
+          id: r.id,
+          status: r.status,
+          startedAt: r.startedAt,
+        })),
+      );
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setUiError(`打开工作流失败：${msg}`);
@@ -75,6 +87,7 @@ export default function App() {
       setWorkflows((prev) => [{ ...w, description: w.description ?? null }, ...prev]);
       setCurrent(w);
       setRunResult(null);
+      setRunHistory([]);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setUiError(`新建工作流失败：${msg}`);
@@ -90,6 +103,22 @@ export default function App() {
     [current],
   );
 
+  const loadRunHistory = useCallback(async () => {
+    if (!current?.id) return;
+    try {
+      const runs = await getRunsByWorkflow(current.id, 20);
+      setRunHistory(
+        (runs as Array<{ id: string; status: string; startedAt: string }>).map((r) => ({
+          id: r.id,
+          status: r.status,
+          startedAt: r.startedAt,
+        })),
+      );
+    } catch {
+      setRunHistory([]);
+    }
+  }, [current?.id]);
+
   const handleRun = useCallback(
     async (inputs: Record<string, unknown>) => {
       if (!current) return;
@@ -98,6 +127,11 @@ export default function App() {
         const result = await startRun(current.id, inputs);
         setRunResult(result);
         setActiveRunTab('logs');
+        if ((result as { status?: string }).status === 'pending') {
+          setRunPolling(true);
+        } else {
+          loadRunHistory();
+        }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         setRunResult({ error: msg });
@@ -105,8 +139,34 @@ export default function App() {
         setActiveRunTab('raw');
       }
     },
-    [current],
+    [current, loadRunHistory],
   );
+
+  useEffect(() => {
+    if (!runPolling || !runResult || typeof runResult !== 'object' || !('runId' in runResult)) return;
+    const runId = (runResult as { runId?: string }).runId;
+    if (!runId) return;
+    const status = (runResult as { status?: string }).status;
+    if (status !== 'pending' && status !== 'running') {
+      setRunPolling(false);
+      loadRunHistory();
+      return;
+    }
+    const interval = setInterval(async () => {
+      try {
+        const updated = await getRun(runId);
+        const s = (updated as { status?: string }).status;
+        setRunResult(updated);
+        if (s === 'success' || s === 'failed') {
+          setRunPolling(false);
+          loadRunHistory();
+        }
+      } catch {
+        setRunPolling(false);
+      }
+    }, 800);
+    return () => clearInterval(interval);
+  }, [runPolling, runResult, loadRunHistory]);
 
   const runWithEditorInputs = useCallback(async () => {
     if (!current) return;
@@ -127,7 +187,16 @@ export default function App() {
     }
   }, [current, runInputsText, handleRun]);
 
-  if (loading) return <div className="p-6">加载中…</div>;
+  const selectRunFromHistory = useCallback(async (runId: string) => {
+    try {
+      const run = await getRun(runId);
+      setRunResult(run);
+      setActiveRunTab('logs');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setUiError(`加载运行详情失败：${msg}`);
+    }
+  }, []);
 
   const nodeLogs =
     runResult && typeof runResult === 'object' && runResult != null && 'nodeLogs' in runResult
@@ -137,6 +206,11 @@ export default function App() {
     runResult && typeof runResult === 'object' && runResult != null && 'outputs' in runResult
       ? (runResult as { outputs?: unknown }).outputs
       : null;
+  const runStatus = runResult && typeof runResult === 'object' && runResult != null && 'status' in runResult
+    ? (runResult as { status?: string }).status
+    : null;
+
+  if (loading) return <div className="p-6">加载中…</div>;
 
   return (
     <div className="grid h-screen grid-cols-[260px_1fr_420px]">
@@ -181,9 +255,9 @@ export default function App() {
             type="button"
             className="mt-2.5 w-full font-semibold"
             onClick={runWithEditorInputs}
-            disabled={!current?.id}
+            disabled={!current?.id || runPolling}
           >
-            运行当前工作流
+            {runPolling ? '运行中…' : '运行当前工作流'}
           </Button>
         </div>
       </aside>
@@ -201,8 +275,12 @@ export default function App() {
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">运行面板</CardTitle>
-              {runResult ? (
-                <Badge variant="secondary">有结果</Badge>
+              {runPolling ? (
+                <Badge variant="default">运行中…</Badge>
+              ) : runResult ? (
+                <Badge variant={runStatus === 'failed' ? 'destructive' : 'secondary'}>
+                  {runStatus === 'success' ? '成功' : runStatus === 'failed' ? '失败' : '有结果'}
+                </Badge>
               ) : (
                 <Badge variant="outline">未运行</Badge>
               )}
@@ -210,6 +288,34 @@ export default function App() {
             <div className="mt-2 text-xs text-muted-foreground">
               {current?.name ? `当前：${current.name}` : '请选择或新建一个工作流'}
             </div>
+            {runHistory.length > 0 && (
+              <div className="mt-3">
+                <div className="mb-1.5 text-xs font-semibold text-muted-foreground">运行历史</div>
+                <ScrollArea className="h-20 rounded border border-border">
+                  <ul className="m-0 list-none p-1.5">
+                    {runHistory.map((r) => (
+                      <li key={r.id}>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-auto w-full justify-between px-2 py-1.5 text-xs font-normal"
+                          onClick={() => selectRunFromHistory(r.id)}
+                        >
+                          <span className="truncate font-mono">{r.id.slice(0, 8)}…</span>
+                          <Badge
+                            variant={r.status === 'failed' ? 'destructive' : r.status === 'success' ? 'secondary' : 'outline'}
+                            className="ml-1 shrink-0 text-[10px]"
+                          >
+                            {r.status}
+                          </Badge>
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                </ScrollArea>
+              </div>
+            )}
           </CardHeader>
           <CardContent className="h-[calc(100%-84px)]">
             <Tabs value={activeRunTab} onValueChange={(v) => setActiveRunTab(v as typeof activeRunTab)} className="h-full">
