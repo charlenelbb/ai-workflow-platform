@@ -3,13 +3,55 @@ import type { Node } from '@xyflow/react';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+
+type KvRow = { id: string; key: string; value: string };
+
+function objectToRows(obj: unknown): KvRow[] {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return [];
+  return Object.entries(obj as Record<string, unknown>).map(([k, v]) => ({
+    id: `${k}-${Math.random().toString(16).slice(2)}`,
+    key: k,
+    value: typeof v === 'string' ? v : JSON.stringify(v),
+  }));
+}
+
+function rowsToObject(rows: KvRow[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  rows.forEach((r) => {
+    const k = r.key.trim();
+    if (!k) return;
+    const raw = r.value ?? '';
+    const trimmed = raw.trim();
+    if (trimmed === 'true') out[k] = true;
+    else if (trimmed === 'false') out[k] = false;
+    else if (trimmed === 'null') out[k] = null;
+    else if (/^-?\d+(\.\d+)?$/.test(trimmed)) out[k] = Number(trimmed);
+    else if (
+      (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+      (trimmed.startsWith('[') && trimmed.endsWith(']'))
+    ) {
+      try {
+        out[k] = JSON.parse(trimmed);
+      } catch {
+        out[k] = raw;
+      }
+    } else {
+      out[k] = raw;
+    }
+  });
+  return out;
+}
 
 export interface AINodeData {
   provider?: 'openai' | 'bailian' | 'local';
@@ -35,32 +77,62 @@ export interface GlobalVariableOption {
   value: string;
 }
 
-function buildGlobalVariableList(nodes: Node[], currentNodeId: string): GlobalVariableOption[] {
-  const list: GlobalVariableOption[] = [
-    { label: '运行输入 (整体)', value: '{{inputs}}' },
-    { label: '运行输入.message', value: '{{inputs.message}}' },
+export interface GlobalVariableGroup {
+  groupLabel: string;
+  groupHint?: string;
+  options: GlobalVariableOption[];
+}
+
+function nodeDisplayName(n: Node): string {
+  const data = (n.data ?? {}) as Record<string, unknown>;
+  const label = typeof data.label === 'string' && data.label.trim() ? data.label.trim() : '';
+  if (label) return label;
+  const type = (n.type as string) || 'node';
+  if (type === 'ai') return 'AI 节点';
+  if (type === 'input') return '输入节点';
+  if (type === 'output') return '输出节点';
+  if (type === 'plain') return '处理节点';
+  if (type === 'start') return '开始';
+  if (type === 'end') return '结束';
+  return type;
+}
+
+function buildGlobalVariableGroups(nodes: Node[], currentNodeId: string): GlobalVariableGroup[] {
+  const groups: GlobalVariableGroup[] = [
+    {
+      groupLabel: '运行输入',
+      options: [
+        { label: 'inputs（整体）', value: '{{inputs}}' },
+        { label: 'inputs.message', value: '{{inputs.message}}' },
+      ],
+    },
   ];
+
   nodes.forEach((n) => {
     if (n.id === currentNodeId) return;
     const type = (n.type as string) || '';
-    list.push({ label: `${n.id} (整体)`, value: `{{${n.id}}}` });
+    const name = nodeDisplayName(n);
+    const hint = n.id;
+    const options: GlobalVariableOption[] = [{ label: '输出（整体）', value: `{{${n.id}}}` }];
     if (type === 'ai') {
-      list.push({ label: `${n.id}.text`, value: `{{${n.id}.text}}` });
-      list.push({ label: `${n.id}.content`, value: `{{${n.id}.content}}` });
+      options.push({ label: 'text', value: `{{${n.id}.text}}` });
+      options.push({ label: 'content', value: `{{${n.id}.content}}` });
     }
+    groups.push({ groupLabel: name, groupHint: hint, options });
   });
-  return list;
+
+  return groups;
 }
 
 function InsertVariableDropdown({
-  variableList,
+  variableGroups,
   inputRef,
   value,
   setValue,
   savedSelectionRef,
   placeholder = '插入变量',
 }: {
-  variableList: GlobalVariableOption[];
+  variableGroups: GlobalVariableGroup[];
   inputRef: React.RefObject<HTMLInputElement | HTMLTextAreaElement | null>;
   value: string;
   setValue: React.Dispatch<React.SetStateAction<string>>;
@@ -99,39 +171,371 @@ function InsertVariableDropdown({
           {placeholder}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="max-h-[220px] min-w-[200px] overflow-y-auto">
-        {variableList.map((opt) => (
-          <DropdownMenuItem
-            key={opt.value}
-            onMouseDown={(e) => {
-              // 防止输入框先失焦导致选区被改写
-              e.preventDefault();
-            }}
-            onSelect={() => {
-              if (handledRef.current) return;
-              handledRef.current = true;
-              handleSelect(opt);
-              requestAnimationFrame(() => {
-                handledRef.current = false;
-              });
-            }}
-            onClick={() => {
-              // 兜底：部分情况下 onSelect 不触发
-              if (handledRef.current) return;
-              handledRef.current = true;
-              handleSelect(opt);
-              requestAnimationFrame(() => {
-                handledRef.current = false;
-              });
-            }}
-            className="flex flex-col items-start gap-0.5"
-          >
-            <code className="text-xs">{opt.value}</code>
-            <span className="text-xs text-muted-foreground">{opt.label}</span>
-          </DropdownMenuItem>
+      <DropdownMenuContent align="start" className="max-h-[320px] min-w-[280px] overflow-y-auto">
+        {variableGroups.map((g, gi) => (
+          <div key={`${g.groupLabel}-${gi}`}>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="flex items-center justify-between">
+                <span className="truncate">{g.groupLabel}</span>
+                {g.groupHint && (
+                  <span className="ml-2 font-mono text-[10px] text-muted-foreground">
+                    {g.groupHint}
+                  </span>
+                )}
+              </DropdownMenuLabel>
+              {g.options.map((opt) => (
+                <DropdownMenuItem
+                  key={`${g.groupLabel}-${opt.value}`}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                  }}
+                  onSelect={() => {
+                    if (handledRef.current) return;
+                    handledRef.current = true;
+                    handleSelect(opt);
+                    requestAnimationFrame(() => {
+                      handledRef.current = false;
+                    });
+                  }}
+                  onClick={() => {
+                    if (handledRef.current) return;
+                    handledRef.current = true;
+                    handleSelect(opt);
+                    requestAnimationFrame(() => {
+                      handledRef.current = false;
+                    });
+                  }}
+                  className="flex items-center justify-between"
+                >
+                  <span className="text-sm">{opt.label}</span>
+                  <Badge variant="secondary" className="font-mono text-[11px]">
+                    {opt.value.replace(/^\{\{|\}\}$/g, '')}
+                  </Badge>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+            {gi < variableGroups.length - 1 && <DropdownMenuSeparator />}
+          </div>
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+function InsertVariableMenu({
+  variableGroups,
+  onInsert,
+  placeholder = '插入变量',
+}: {
+  variableGroups: GlobalVariableGroup[];
+  onInsert: (template: string) => void;
+  placeholder?: string;
+}) {
+  const handledRef = useRef(false);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger>
+        <Button type="button" variant="outline" size="sm">
+          {placeholder}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-h-[320px] min-w-[280px] overflow-y-auto">
+        {variableGroups.map((g, gi) => (
+          <div key={`${g.groupLabel}-${gi}`}>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="flex items-center justify-between">
+                <span className="truncate">{g.groupLabel}</span>
+                {g.groupHint && (
+                  <span className="ml-2 font-mono text-[10px] text-muted-foreground">
+                    {g.groupHint}
+                  </span>
+                )}
+              </DropdownMenuLabel>
+              {g.options.map((opt) => (
+                <DropdownMenuItem
+                  key={`${g.groupLabel}-${opt.value}`}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onSelect={() => {
+                    if (handledRef.current) return;
+                    handledRef.current = true;
+                    onInsert(opt.value);
+                    requestAnimationFrame(() => {
+                      handledRef.current = false;
+                    });
+                  }}
+                  onClick={() => {
+                    if (handledRef.current) return;
+                    handledRef.current = true;
+                    onInsert(opt.value);
+                    requestAnimationFrame(() => {
+                      handledRef.current = false;
+                    });
+                  }}
+                  className="flex items-center justify-between"
+                >
+                  <span className="text-sm">{opt.label}</span>
+                  <Badge variant="secondary" className="font-mono text-[11px]">
+                    {opt.value.replace(/^\{\{|\}\}$/g, '')}
+                  </Badge>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+            {gi < variableGroups.length - 1 && <DropdownMenuSeparator />}
+          </div>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function tokenizeTemplateValue(value: string): Array<{ kind: 'text' | 'token'; raw: string }> {
+  const parts: Array<{ kind: 'text' | 'token'; raw: string }> = [];
+  const re = /\{\{[^}]+\}\}/g;
+  let last = 0;
+  for (;;) {
+    const m = re.exec(value);
+    if (!m) break;
+    if (m.index > last) parts.push({ kind: 'text', raw: value.slice(last, m.index) });
+    parts.push({ kind: 'token', raw: m[0] });
+    last = m.index + m[0].length;
+  }
+  if (last < value.length) parts.push({ kind: 'text', raw: value.slice(last) });
+  if (parts.length === 0) parts.push({ kind: 'text', raw: value });
+  return parts;
+}
+
+function TokenInput({
+  value,
+  onChange,
+  placeholder,
+  className,
+  hostRef,
+  onCaretChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  className?: string;
+  hostRef?: React.RefObject<HTMLDivElement>;
+  onCaretChange?: (caret: number) => void;
+}) {
+  const ref = hostRef ?? useRef<HTMLDivElement>(null);
+  const parts = useMemo(() => tokenizeTemplateValue(value), [value]);
+  const pendingCaretRef = useRef<number | null>(null);
+
+  const tokenRanges = useCallback(() => {
+    const ranges: Array<{ start: number; end: number }> = [];
+    const re = /\{\{[^}]+\}\}/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(value))) {
+      ranges.push({ start: m.index, end: m.index + m[0].length });
+    }
+    return ranges;
+  }, [value]);
+
+  const getCaretIndex = useCallback((): number => {
+    const root = ref.current;
+    if (!root) return value.length;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return value.length;
+    const range = sel.getRangeAt(0);
+    if (!root.contains(range.startContainer)) return value.length;
+    let idx = 0;
+    const nodes = Array.from(root.childNodes);
+    for (const n of nodes) {
+      if (n === range.startContainer) {
+        if (n.nodeType === Node.TEXT_NODE) idx += range.startOffset;
+        break;
+      }
+      if (n.nodeType === Node.TEXT_NODE) {
+        idx += n.textContent?.length ?? 0;
+      } else if (n.nodeType === Node.ELEMENT_NODE) {
+        const e = n as HTMLElement;
+        const tmpl = e.getAttribute('data-template');
+        if (tmpl) idx += tmpl.length;
+        else idx += e.textContent?.length ?? 0;
+      }
+    }
+    return Math.max(0, Math.min(idx, value.length));
+  }, [ref, value.length]);
+
+  const setCaretIndex = useCallback(
+    (pos: number) => {
+      const root = ref.current;
+      if (!root) return;
+      const range = document.createRange();
+      const sel = window.getSelection();
+      let idx = 0;
+      let placed = false;
+      const children = Array.from(root.childNodes);
+      for (const n of children) {
+        if (placed) break;
+        if (n.nodeType === Node.TEXT_NODE) {
+          const len = n.textContent?.length ?? 0;
+          if (idx + len >= pos) {
+            range.setStart(n, Math.max(0, pos - idx));
+            range.collapse(true);
+            placed = true;
+          } else {
+            idx += len;
+          }
+        } else if (n.nodeType === Node.ELEMENT_NODE) {
+          const el = n as HTMLElement;
+          const tmpl = el.getAttribute('data-template');
+          const len = tmpl?.length ?? (el.textContent?.length ?? 0);
+          if (idx + len >= pos) {
+            // 光标落在 token 上时，放到 token 前或后（尽量放后）
+            const parent = root;
+            const atEnd = pos - idx >= len;
+            const offset = Array.prototype.indexOf.call(parent.childNodes, n) + (atEnd ? 1 : 0);
+            range.setStart(parent, offset);
+            range.collapse(true);
+            placed = true;
+          } else {
+            idx += len;
+          }
+        }
+      }
+      if (!placed) {
+        range.selectNodeContents(root);
+        range.collapse(false);
+      }
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    },
+    [ref],
+  );
+
+  const rebuildValueFromDom = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    const out: string[] = [];
+    el.childNodes.forEach((n) => {
+      if (n.nodeType === Node.TEXT_NODE) {
+        out.push(n.textContent ?? '');
+        return;
+      }
+      if (n.nodeType === Node.ELEMENT_NODE) {
+        const e = n as HTMLElement;
+        const tmpl = e.getAttribute('data-template');
+        if (tmpl) out.push(tmpl);
+        else out.push(e.textContent ?? '');
+      }
+    });
+    const next = out.join('');
+    if (next !== value) onChange(next);
+  }, [onChange, value]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key !== 'Backspace' && e.key !== 'Delete') return;
+      const caret = getCaretIndex();
+      const ranges = tokenRanges();
+      const isBackspace = e.key === 'Backspace';
+      const targetPos = isBackspace ? caret - 1 : caret;
+      const hit = ranges.find((r) => targetPos >= r.start && targetPos < r.end);
+      if (!hit) return;
+      e.preventDefault();
+      const newVal = value.slice(0, hit.start) + value.slice(hit.end);
+      pendingCaretRef.current = hit.start;
+      onChange(newVal);
+    },
+    [getCaretIndex, tokenRanges, value, onChange],
+  );
+
+  // 在外部 value 更新后，如果有 pending caret，就恢复光标
+  const prevValueRef = useRef<string>(value);
+  if (prevValueRef.current !== value) {
+    prevValueRef.current = value;
+    requestAnimationFrame(() => {
+      const pos = pendingCaretRef.current;
+      if (pos != null) {
+        pendingCaretRef.current = null;
+        setCaretIndex(pos);
+      }
+    });
+  }
+
+  return (
+    <div
+      key={value}
+      ref={ref}
+      contentEditable
+      suppressContentEditableWarning
+      data-placeholder={placeholder ?? ''}
+      className={`${className ?? ''} flex flex-wrap items-center gap-1 py-1.5`}
+      onKeyDown={handleKeyDown}
+      onBlur={() => {
+        rebuildValueFromDom();
+        onCaretChange?.(getCaretIndex());
+      }}
+      onKeyUp={() => onCaretChange?.(getCaretIndex())}
+      onMouseUp={() => onCaretChange?.(getCaretIndex())}
+      onSelect={() => onCaretChange?.(getCaretIndex())}
+    >
+      {parts.map((p, i) =>
+        p.kind === 'token' ? (
+          <span key={`${p.raw}-${i}`} data-template={p.raw} contentEditable={false}>
+            <Badge variant="secondary" className="font-mono text-[11px]">
+              {p.raw.replace(/^\{\{|\}\}$/g, '')}
+            </Badge>
+          </span>
+        ) : (
+          <span key={`${p.raw}-${i}`}>{p.raw}</span>
+        ),
+      )}
+    </div>
+  );
+}
+
+function KvRowEditor({
+  row,
+  variableGroups,
+  inputClassName,
+  onChange,
+  onDelete,
+}: {
+  row: KvRow;
+  variableGroups: GlobalVariableGroup[];
+  inputClassName: string;
+  onChange: (next: KvRow) => void;
+  onDelete: () => void;
+}) {
+  const caretRef = useRef<number>(row.value.length);
+  return (
+    <div className="grid grid-cols-[110px_1fr_auto] items-start gap-2">
+      <Input value={row.key} onChange={(e) => onChange({ ...row, key: e.target.value })} placeholder="key" />
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-2">
+          <InsertVariableMenu
+            variableGroups={variableGroups}
+            placeholder="插入变量"
+            onInsert={(tmpl) => {
+              const pos = caretRef.current ?? row.value.length;
+              onChange({
+                ...row,
+                value: (row.value ?? '').slice(0, pos) + tmpl + (row.value ?? '').slice(pos),
+              });
+              caretRef.current = pos + tmpl.length;
+            }}
+          />
+        </div>
+        <TokenInput
+          value={row.value}
+          onChange={(v) => onChange({ ...row, value: v })}
+          placeholder="{{inputs.message}}"
+          className={inputClassName}
+          onCaretChange={(c) => {
+            caretRef.current = c;
+          }}
+        />
+      </div>
+      <Button type="button" variant="ghost" size="icon-sm" onClick={onDelete} aria-label="删除">
+        ×
+      </Button>
+    </div>
   );
 }
 
@@ -158,38 +562,24 @@ export function NodeConfigPanel({ node, nodes, onUpdate, onClose }: NodeConfigPa
 
   // input
   const inputData = baseData as InputNodeData;
-  const [assignmentsText, setAssignmentsText] = useState(
-    JSON.stringify(inputData.assignments ?? { message: '{{inputs.message}}' }, null, 2),
+  const [assignmentRows, setAssignmentRows] = useState<KvRow[]>(
+    () => objectToRows(inputData.assignments ?? { message: '{{inputs.message}}' }),
   );
 
   // output
   const outputData = baseData as OutputNodeData;
-  const [outputMappingText, setOutputMappingText] = useState(
-    JSON.stringify(outputData.outputMapping ?? { result: '{{inputs.message}}' }, null, 2),
+  const [outputRows, setOutputRows] = useState<KvRow[]>(
+    () => objectToRows(outputData.outputMapping ?? { result: '{{inputs.message}}' }),
   );
 
   const refUserMapping = useRef<HTMLInputElement>(null);
-  const refAssignments = useRef<HTMLTextAreaElement>(null);
-  const refOutputMapping = useRef<HTMLTextAreaElement>(null);
   const savedUserMappingSelection = useRef<{ start: number; end: number } | null>(null);
-  const savedAssignmentsSelection = useRef<{ start: number; end: number } | null>(null);
-  const savedOutputMappingSelection = useRef<{ start: number; end: number } | null>(null);
+  const userMappingCaretRef = useRef<number>(userMapping.length);
 
-  const captureSelection = useCallback(
-    (
-      ref: React.RefObject<HTMLInputElement | HTMLTextAreaElement | null>,
-      savedRef: React.MutableRefObject<{ start: number; end: number } | null>,
-    ) => {
-      const el = ref.current;
-      if (el && 'selectionStart' in el) {
-        savedRef.current = { start: el.selectionStart ?? 0, end: el.selectionEnd ?? 0 };
-      }
-    },
-    [],
-  );
+  // 之前用于 textarea 选区插入的函数已不再需要（改为逐行 KV + TokenInput）。
 
-  const variableList = useMemo(
-    () => (node && nodes.length ? buildGlobalVariableList(nodes, node.id) : []),
+  const variableGroups = useMemo(
+    () => (node && nodes.length ? buildGlobalVariableGroups(nodes, node.id) : []),
     [node, nodes],
   );
 
@@ -204,34 +594,14 @@ export function NodeConfigPanel({ node, nodes, onUpdate, onClose }: NodeConfigPa
         inputMapping: { user: userMapping },
       });
     } else if (node.type === 'input') {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(assignmentsText || '{}');
-      } catch (e) {
-        alert(`assignments 必须是 JSON 对象: ${e instanceof Error ? e.message : String(e)}`);
-        return;
-      }
-      if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        alert('assignments 必须是 JSON 对象，例如：{"foo":"{{inputs.message}}"}');
-        return;
-      }
+      const parsed = rowsToObject(assignmentRows);
       onUpdate(node.id, {
         ...node.data,
         label: label || '输入',
         assignments: parsed as Record<string, unknown>,
       });
     } else if (node.type === 'output') {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(outputMappingText || '{}');
-      } catch (e) {
-        alert(`outputMapping 必须是 JSON 对象: ${e instanceof Error ? e.message : String(e)}`);
-        return;
-      }
-      if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        alert('outputMapping 必须是 JSON 对象，例如：{"result":"{{ai.text}}"}');
-        return;
-      }
+      const parsed = rowsToObject(outputRows);
       onUpdate(node.id, {
         ...node.data,
         label: label || '输出',
@@ -247,8 +617,8 @@ export function NodeConfigPanel({ node, nodes, onUpdate, onClose }: NodeConfigPa
     model,
     systemPrompt,
     userMapping,
-    assignmentsText,
-    outputMappingText,
+    assignmentRows,
+    outputRows,
     onUpdate,
     onClose,
   ]);
@@ -307,7 +677,7 @@ export function NodeConfigPanel({ node, nodes, onUpdate, onClose }: NodeConfigPa
             <div className="flex items-center gap-2">
               <Label className="mb-0">用户输入映射</Label>
               <InsertVariableDropdown
-                variableList={variableList}
+                variableGroups={variableGroups}
                 inputRef={refUserMapping}
                 value={userMapping}
                 setValue={setUserMapping}
@@ -315,15 +685,16 @@ export function NodeConfigPanel({ node, nodes, onUpdate, onClose }: NodeConfigPa
                 placeholder="插入全局变量"
               />
             </div>
-            <input
-              ref={refUserMapping}
+            <TokenInput
               value={userMapping}
-              onChange={(e) => setUserMapping(e.target.value)}
-              onSelect={() => captureSelection(refUserMapping, savedUserMappingSelection)}
-              onKeyUp={() => captureSelection(refUserMapping, savedUserMappingSelection)}
-              onMouseUp={() => captureSelection(refUserMapping, savedUserMappingSelection)}
+              onChange={setUserMapping}
               placeholder="{{inputs.message}} 或 {{某节点ID.text}}"
               className={inputClassName}
+              hostRef={refUserMapping}
+              onCaretChange={(c) => {
+                userMappingCaretRef.current = c;
+                savedUserMappingSelection.current = { start: c, end: c };
+              }}
             />
             <span className="text-xs text-muted-foreground">
               支持 {'{{inputs.xxx}}'}、{'{{节点ID}}'}、{'{{节点ID.字段}}'}
@@ -336,60 +707,70 @@ export function NodeConfigPanel({ node, nodes, onUpdate, onClose }: NodeConfigPa
       )}
 
       {node.type === 'input' && (
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center gap-2">
-            <Label className="mb-0">变量赋值（JSON 对象）</Label>
-            <InsertVariableDropdown
-              variableList={variableList}
-              inputRef={refAssignments}
-              value={assignmentsText}
-              setValue={setAssignmentsText}
-              savedSelectionRef={savedAssignmentsSelection}
-              placeholder="插入全局变量"
-            />
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <Label className="mb-0">变量赋值</Label>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                setAssignmentRows((prev) => prev.concat({ id: `row-${Date.now()}`, key: '', value: '' }))
+              }
+            >
+              + 添加
+            </Button>
           </div>
-          <textarea
-            ref={refAssignments}
-            value={assignmentsText}
-            onChange={(e) => setAssignmentsText(e.target.value)}
-            onSelect={() => captureSelection(refAssignments, savedAssignmentsSelection)}
-            onKeyUp={() => captureSelection(refAssignments, savedAssignmentsSelection)}
-            onMouseUp={() => captureSelection(refAssignments, savedAssignmentsSelection)}
-            rows={8}
-            className={textareaClassName}
-          />
-          <span className="text-xs text-muted-foreground">
-            例：{'{"message":"{{inputs.message}}","foo":123}'}
-          </span>
+          <div className="flex flex-col gap-2">
+            {assignmentRows.map((r) => (
+              <KvRowEditor
+                key={r.id}
+                row={r}
+                variableGroups={variableGroups}
+                inputClassName={inputClassName}
+                onChange={(next) =>
+                  setAssignmentRows((prev) => prev.map((x) => (x.id === r.id ? next : x)))
+                }
+                onDelete={() => setAssignmentRows((prev) => prev.filter((x) => x.id !== r.id))}
+              />
+            ))}
+            {assignmentRows.length === 0 && (
+              <div className="text-xs text-muted-foreground">暂无变量。点击“+ 添加”新增一行。</div>
+            )}
+          </div>
         </div>
       )}
 
       {node.type === 'output' && (
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center gap-2">
-            <Label className="mb-0">输出映射（JSON 对象）</Label>
-            <InsertVariableDropdown
-              variableList={variableList}
-              inputRef={refOutputMapping}
-              value={outputMappingText}
-              setValue={setOutputMappingText}
-              savedSelectionRef={savedOutputMappingSelection}
-              placeholder="插入全局变量"
-            />
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <Label className="mb-0">输出映射</Label>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                setOutputRows((prev) => prev.concat({ id: `row-${Date.now()}`, key: '', value: '' }))
+              }
+            >
+              + 添加
+            </Button>
           </div>
-          <textarea
-            ref={refOutputMapping}
-            value={outputMappingText}
-            onChange={(e) => setOutputMappingText(e.target.value)}
-            onSelect={() => captureSelection(refOutputMapping, savedOutputMappingSelection)}
-            onKeyUp={() => captureSelection(refOutputMapping, savedOutputMappingSelection)}
-            onMouseUp={() => captureSelection(refOutputMapping, savedOutputMappingSelection)}
-            rows={8}
-            className={textareaClassName}
-          />
-          <span className="text-xs text-muted-foreground">
-            例：{'{"result":"{{AI节点ID.text}}","raw":"{{inputs.message}}"}'} — AI 节点输出用 {'{{节点ID.text}}'} 或 {'{{节点ID.content}}'}
-          </span>
+          <div className="flex flex-col gap-2">
+            {outputRows.map((r) => (
+              <KvRowEditor
+                key={r.id}
+                row={r}
+                variableGroups={variableGroups}
+                inputClassName={inputClassName}
+                onChange={(next) => setOutputRows((prev) => prev.map((x) => (x.id === r.id ? next : x)))}
+                onDelete={() => setOutputRows((prev) => prev.filter((x) => x.id !== r.id))}
+              />
+            ))}
+            {outputRows.length === 0 && (
+              <div className="text-xs text-muted-foreground">暂无输出。点击“+ 添加”新增一行。</div>
+            )}
+          </div>
         </div>
       )}
       <Button type="button" onClick={handleApply}>
