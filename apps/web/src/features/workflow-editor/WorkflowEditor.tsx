@@ -16,6 +16,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { nodeTypes } from './node-types';
+import { NodeConfigPanel } from '@/features/node-config/NodeConfigPanel';
 import type { WorkflowGraph } from '@/types/workflow';
 
 const initialNodes: Node[] = [
@@ -82,6 +83,9 @@ export function WorkflowEditor({
   const [edges, setEdges, onEdgesChange] = useEdgesState(initE);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+
+  const selectedNode = selectedNodeId ? nodes.find((n) => n.id === selectedNodeId) ?? null : null;
 
   const onConnect = useCallback(
     (c: Connection) => setEdges((eds) => addEdge(c, eds)),
@@ -99,20 +103,38 @@ export function WorkflowEditor({
   }, [workflowId, nodes, edges, onSave]);
 
   const addNode = useCallback(
-    (type: 'start' | 'end' | 'plain') => {
+    (type: 'start' | 'end' | 'plain' | 'ai') => {
       const id = `${type}-${Date.now()}`;
       const y = nodes.length * 120;
+      const defaultData: Record<string, unknown> =
+        type === 'plain'
+          ? { label: '处理节点' }
+          : type === 'ai'
+            ? {
+                label: 'AI 节点',
+                provider: 'openai',
+                model: 'gpt-3.5-turbo',
+                systemPrompt: '',
+                inputMapping: { user: '{{start}}' },
+              }
+            : {};
       setNodes((nds) =>
         nds.concat({
           id,
           type,
           position: { x: 250 + (Math.random() - 0.5) * 200, y },
-          data: type === 'plain' ? { label: '处理节点' } : {},
+          data: defaultData,
         }),
       );
     },
     [nodes.length, setNodes],
   );
+
+  const updateNodeData = useCallback((nodeId: string, data: Record<string, unknown>) => {
+    setNodes((nds) =>
+      nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, ...data } } : n)),
+    );
+  }, [setNodes]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
@@ -142,6 +164,13 @@ export function WorkflowEditor({
         </button>
         <button
           type="button"
+          onClick={() => addNode('ai')}
+          style={{ padding: '6px 12px', cursor: 'pointer' }}
+        >
+          添加 AI 节点
+        </button>
+        <button
+          type="button"
           onClick={() => addNode('end')}
           style={{ padding: '6px 12px', cursor: 'pointer' }}
         >
@@ -160,7 +189,14 @@ export function WorkflowEditor({
             {onRun && (
               <button
                 type="button"
-                onClick={onRun}
+                onClick={async () => {
+                  setRunning(true);
+                  try {
+                    await onRun();
+                  } finally {
+                    setRunning(false);
+                  }
+                }}
                 disabled={running}
                 style={{ padding: '6px 12px', cursor: running ? 'wait' : 'pointer' }}
               >
@@ -170,20 +206,31 @@ export function WorkflowEditor({
           </>
         )}
       </header>
-      <div style={{ flex: 1 }}>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange as OnNodesChange}
-          onEdgesChange={onEdgesChange as OnEdgesChange}
-          onConnect={onConnect}
-          nodeTypes={nodeTypes}
-          fitView
-        >
-          <Background />
-          <Controls />
-          <MiniMap />
-        </ReactFlow>
+      <div style={{ flex: 1, display: 'flex' }}>
+        <div style={{ flex: 1 }}>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange as OnNodesChange}
+            onEdgesChange={onEdgesChange as OnEdgesChange}
+            onConnect={onConnect}
+            onNodeClick={(_e, node) => setSelectedNodeId(node.id)}
+            onPaneClick={() => setSelectedNodeId(null)}
+            nodeTypes={nodeTypes}
+            fitView
+          >
+            <Background />
+            <Controls />
+            <MiniMap />
+          </ReactFlow>
+        </div>
+        {selectedNode && (
+          <NodeConfigPanel
+            node={selectedNode}
+            onUpdate={updateNodeData}
+            onClose={() => setSelectedNodeId(null)}
+          />
+        )}
       </div>
     </div>
   );

@@ -138,7 +138,7 @@ export default function App() {
               bottom: 0,
               left: 260,
               right: 0,
-              maxHeight: 200,
+              maxHeight: 320,
               overflow: 'auto',
               background: '#1e293b',
               color: '#e2e8f0',
@@ -147,10 +147,57 @@ export default function App() {
               fontSize: 12,
             }}
           >
-            <strong>运行结果：</strong>
-            <pre style={{ margin: '8px 0 0', whiteSpace: 'pre-wrap' }}>
-              {JSON.stringify(runResult, null, 2)}
-            </pre>
+            <strong>运行结果</strong>
+            {runResult && typeof runResult === 'object' && 'nodeLogs' in runResult && Array.isArray((runResult as { nodeLogs?: unknown }).nodeLogs) && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ marginBottom: 8, fontWeight: 600 }}>节点日志</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {((runResult as { nodeLogs: Array<{ nodeId: string; status: string; input?: unknown; output?: unknown; error?: string }> }).nodeLogs).map((log, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        padding: 10,
+                        background: log.status === 'failed' ? 'rgba(239,68,68,0.2)' : 'rgba(30,41,59,0.8)',
+                        borderRadius: 6,
+                        border: '1px solid #334155',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                        <span style={{ fontWeight: 600 }}>{log.nodeId}</span>
+                        <span style={{ color: log.status === 'failed' ? '#f87171' : '#86efac' }}>
+                          {log.status}
+                        </span>
+                      </div>
+                      {log.error && (
+                        <div style={{ color: '#f87171', marginBottom: 4 }}>{log.error}</div>
+                      )}
+                      {log.input != null && Object.keys(log.input as object).length > 0 && (
+                        <details style={{ marginBottom: 4 }}>
+                          <summary style={{ cursor: 'pointer' }}>输入</summary>
+                          <pre style={{ margin: '4px 0 0', whiteSpace: 'pre-wrap', fontSize: 11 }}>
+                            {JSON.stringify(log.input, null, 2)}
+                          </pre>
+                        </details>
+                      )}
+                      {log.output != null && Object.keys(log.output as object).length > 0 && (
+                        <details>
+                          <summary style={{ cursor: 'pointer' }}>输出</summary>
+                          <pre style={{ margin: '4px 0 0', whiteSpace: 'pre-wrap', fontSize: 11 }}>
+                            {JSON.stringify(log.output, null, 2)}
+                          </pre>
+                        </details>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <details style={{ marginTop: 12 }}>
+              <summary style={{ cursor: 'pointer' }}>原始 JSON</summary>
+              <pre style={{ margin: '8px 0 0', whiteSpace: 'pre-wrap' }}>
+                {JSON.stringify(runResult, null, 2)}
+              </pre>
+            </details>
           </div>
         )}
       </main>

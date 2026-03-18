@@ -2,16 +2,16 @@ import { IsString, IsOptional, IsObject, IsArray, ValidateNested } from 'class-v
 import { Type } from 'class-transformer';
 
 class NodeDto {
-  id: string;
-  type: string;
-  position: { x: number; y: number };
-  data: Record<string, unknown>;
+  id!: string;
+  type!: string;
+  position!: { x: number; y: number };
+  data!: Record<string, unknown>;
 }
 
 class EdgeDto {
-  id: string;
-  source: string;
-  target: string;
+  id!: string;
+  source!: string;
+  target!: string;
   sourceHandle?: string;
   targetHandle?: string;
 }
@@ -20,17 +20,17 @@ class GraphDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => Object)
-  nodes: NodeDto[];
+  nodes!: NodeDto[];
 
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => Object)
-  edges: EdgeDto[];
+  edges!: EdgeDto[];
 }
 
 export class CreateWorkflowDto {
   @IsString()
-  name: string;
+  name!: string;
 
   @IsOptional()
   @IsString()
@@ -43,7 +43,7 @@ export class CreateWorkflowDto {
   @IsObject()
   @ValidateNested()
   @Type(() => GraphDto)
-  graph: GraphDto;
+  graph!: GraphDto;
 
   @IsOptional()
   @IsArray()

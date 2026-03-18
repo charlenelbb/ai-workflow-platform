@@ -30,8 +30,9 @@ ai-workflow-platform/
 ### 1. 环境
 
 - Node.js 18+
-- PostgreSQL（可用 Docker：见下）
-- 可选：Redis（MVP 可不用）
+- PostgreSQL（推荐 Docker，见下）
+- Redis（推荐 Docker，见下；Phase 1 连接可选）
+- 使用 AI 节点时需配置 `OPENAI_API_KEY`（见 `.env.example`）
 
 ### 2. 后端
 
@@ -56,23 +57,26 @@ npm run dev
 
 前端默认：http://localhost:3000，请求会通过 Vite 代理到 `/api` -> 3001。
 
-### 4. 使用 Docker 运行 PostgreSQL（推荐）
+### 4. 使用 Docker 运行 PostgreSQL + Redis（推荐）
 
 在项目根目录执行：
 
 ```bash
-docker compose up -d postgres
+docker compose up -d postgres redis
 ```
 
-数据库会监听 `localhost:5432`，用户名/密码/库名均为 `postgres`，与 `apps/api/.env` 中的 `DATABASE_URL` 一致。数据持久化在 Docker volume `postgres_data`。
+- **PostgreSQL**：`localhost:5432`，用户/密码/库名均为 `postgres`，与 `DATABASE_URL` 一致；数据持久化在 volume `postgres_data`。
+- **Redis**：`localhost:6379`，与 `REDIS_URL` 一致；数据持久化在 volume `redis_data`。
 
 停止：`docker compose down`（加 `-v` 会删除数据）。
 
-## MVP 已实现
+## MVP 已实现（阶段 1 + 2）
 
 - 工作流列表、新建、打开、保存（graph 存库）
-- 可视化编辑器：拖拽画布、添加开始/结束/普通节点、连线
-- 同步执行：提交运行 → 拓扑执行 → 返回 outputs 与简单 nodeLogs
+- 可视化编辑器：拖拽画布、添加开始/结束/普通/**AI** 节点、连线
+- **AI 节点**：配置模型、System Prompt、输入映射（`{{节点ID}}` 引用上游）；后端 OpenAI 实现，预留百炼/本地；执行时带重试
+- 同步执行：按 DAG 拓扑执行 → AI 节点调 LLM → 结果写入上下文；RunRecord 含 nodeLogs 落库
+- 运行结果：节点日志（每节点 input/output/status/error）+ 原始 JSON
 
 ## 后续阶段（见 DESIGN.md）
 
