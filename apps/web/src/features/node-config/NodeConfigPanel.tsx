@@ -91,6 +91,9 @@ function nodeDisplayName(n: Node): string {
   if (type === 'ai') return 'AI 节点';
   if (type === 'input') return '输入节点';
   if (type === 'output') return '输出节点';
+  if (type === 'http') return 'HTTP 节点';
+  if (type === 'condition_if') return '条件分支';
+  if (type === 'condition_switch') return '多分支';
   if (type === 'plain') return '处理节点';
   if (type === 'start') return '开始';
   if (type === 'end') return '结束';
@@ -117,6 +120,11 @@ function buildGlobalVariableGroups(nodes: Node[], currentNodeId: string): Global
     if (type === 'ai') {
       options.push({ label: 'text', value: `{{${n.id}.text}}` });
       options.push({ label: 'content', value: `{{${n.id}.content}}` });
+    }
+    if (type === 'http') {
+      options.push({ label: 'status', value: `{{${n.id}.status}}` });
+      options.push({ label: 'data', value: `{{${n.id}.data}}` });
+      options.push({ label: 'raw', value: `{{${n.id}.raw}}` });
     }
     groups.push({ groupLabel: name, groupHint: hint, options });
   });
@@ -572,6 +580,41 @@ export function NodeConfigPanel({ node, nodes, onUpdate, onClose }: NodeConfigPa
     () => objectToRows(outputData.outputMapping ?? { result: '{{inputs.message}}' }),
   );
 
+  // http
+  const httpData = baseData as { method?: string; url?: string; headers?: Record<string, string>; body?: string };
+  const [httpMethod, setHttpMethod] = useState(httpData.method ?? 'GET');
+  const [httpUrl, setHttpUrl] = useState(httpData.url ?? 'https://api.example.com');
+  const [httpHeaderRows, setHttpHeaderRows] = useState<KvRow[]>(
+    () => objectToRows((httpData.headers ?? {}) as Record<string, unknown>),
+  );
+  const [httpBody, setHttpBody] = useState(httpData.body ?? '');
+
+  // condition_if
+  const condIfData = baseData as { expression?: string };
+  const [condIfExpression, setCondIfExpression] = useState(condIfData.expression ?? '{{inputs.score}} > 60');
+
+  // condition_switch
+  const condSwitchData = baseData as {
+    variable?: string;
+    cases?: Array<{ value: string; outputKey: string }>;
+    defaultOutput?: string;
+  };
+  const [condSwitchVariable, setCondSwitchVariable] = useState(condSwitchData.variable ?? '{{inputs.type}}');
+  const [condSwitchCases, setCondSwitchCases] = useState<
+    Array<{ id: string; value: string; outputKey: string }>
+  >(
+    () =>
+      (condSwitchData.cases ?? [
+        { value: 'a', outputKey: 'a' },
+        { value: 'b', outputKey: 'b' },
+      ]).map((c, i) => ({
+        value: c.value ?? '',
+        outputKey: c.outputKey ?? `case${i}`,
+        id: `case-${i}`,
+      })),
+  );
+  const [condSwitchDefault, setCondSwitchDefault] = useState(condSwitchData.defaultOutput ?? '__default__');
+
   const refUserMapping = useRef<HTMLInputElement>(null);
   const savedUserMappingSelection = useRef<{ start: number; end: number } | null>(null);
   const userMappingCaretRef = useRef<number>(userMapping.length);
@@ -607,6 +650,33 @@ export function NodeConfigPanel({ node, nodes, onUpdate, onClose }: NodeConfigPa
         label: label || '输出',
         outputMapping: parsed as Record<string, unknown>,
       });
+    } else if (node.type === 'http') {
+      const headers = rowsToObject(httpHeaderRows) as Record<string, string>;
+      onUpdate(node.id, {
+        ...node.data,
+        label: label || 'HTTP',
+        method: httpMethod,
+        url: httpUrl,
+        headers,
+        body: httpBody || undefined,
+      });
+    } else if (node.type === 'condition_if') {
+      onUpdate(node.id, {
+        ...node.data,
+        label: label || '条件分支',
+        expression: condIfExpression,
+        trueOutput: 'true',
+        falseOutput: 'false',
+      });
+    } else if (node.type === 'condition_switch') {
+      const cases = condSwitchCases.map((c) => ({ value: c.value, outputKey: c.outputKey }));
+      onUpdate(node.id, {
+        ...node.data,
+        label: label || '多分支',
+        variable: condSwitchVariable,
+        cases,
+        defaultOutput: condSwitchDefault,
+      });
     } else {
       onUpdate(node.id, { ...node.data, label });
     }
@@ -619,12 +689,27 @@ export function NodeConfigPanel({ node, nodes, onUpdate, onClose }: NodeConfigPa
     userMapping,
     assignmentRows,
     outputRows,
+    httpMethod,
+    httpUrl,
+    httpHeaderRows,
+    httpBody,
+    condIfExpression,
+    condSwitchVariable,
+    condSwitchCases,
+    condSwitchDefault,
     onUpdate,
     onClose,
   ]);
 
   if (!node) return null;
-  if (node.type !== 'ai' && node.type !== 'input' && node.type !== 'output') {
+  const hasConfig =
+    node.type === 'ai' ||
+    node.type === 'input' ||
+    node.type === 'output' ||
+    node.type === 'http' ||
+    node.type === 'condition_if' ||
+    node.type === 'condition_switch';
+  if (!hasConfig) {
     return (
       <div className="w-[280px] border-l border-border bg-muted/30 p-4 text-sm">
         <div className="mb-3 flex items-center justify-between">
@@ -647,7 +732,19 @@ export function NodeConfigPanel({ node, nodes, onUpdate, onClose }: NodeConfigPa
     <div className="flex w-[280px] flex-col gap-3 border-l border-border bg-muted/30 p-4 text-sm">
       <div className="flex items-center justify-between">
         <strong>
-          {node.type === 'ai' ? 'AI 节点配置' : node.type === 'input' ? '输入节点配置' : '输出节点配置'}
+          {node.type === 'ai'
+            ? 'AI 节点配置'
+            : node.type === 'input'
+              ? '输入节点配置'
+              : node.type === 'output'
+                ? '输出节点配置'
+                : node.type === 'http'
+                  ? 'HTTP 节点配置'
+                  : node.type === 'condition_if'
+                    ? '条件分支配置'
+                    : node.type === 'condition_switch'
+                      ? '多分支配置'
+                      : '节点配置'}
         </strong>
         <Button type="button" variant="ghost" size="icon-xs" onClick={onClose} aria-label="关闭">
           ×
@@ -773,6 +870,223 @@ export function NodeConfigPanel({ node, nodes, onUpdate, onClose }: NodeConfigPa
           </div>
         </div>
       )}
+
+      {node.type === 'http' && (
+        <>
+          <div className="flex flex-col gap-1.5">
+            <Label>请求方法</Label>
+            <select
+              value={httpMethod}
+              onChange={(e) => setHttpMethod(e.target.value)}
+              className={inputClassName}
+            >
+              <option value="GET">GET</option>
+              <option value="POST">POST</option>
+              <option value="PUT">PUT</option>
+              <option value="DELETE">DELETE</option>
+            </select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center gap-2">
+              <Label className="mb-0">URL</Label>
+              <InsertVariableMenu
+                variableGroups={variableGroups}
+                placeholder="插入变量"
+                onInsert={(tmpl) => setHttpUrl((prev) => prev + tmpl)}
+              />
+            </div>
+            <Input
+              value={httpUrl}
+              onChange={(e) => setHttpUrl(e.target.value)}
+              placeholder="https://api.example.com"
+              className={inputClassName}
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <Label className="mb-0">请求头（可选）</Label>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  setHttpHeaderRows((prev) =>
+                    prev.concat({ id: `h-${Date.now()}`, key: 'Content-Type', value: 'application/json' }),
+                  )
+                }
+              >
+                + 添加
+              </Button>
+            </div>
+            <div className="flex flex-col gap-2">
+              {httpHeaderRows.map((r) => (
+                <div key={r.id} className="grid grid-cols-[100px_1fr_auto] items-center gap-2">
+                  <Input
+                    value={r.key}
+                    onChange={(e) =>
+                      setHttpHeaderRows((prev) =>
+                        prev.map((x) => (x.id === r.id ? { ...x, key: e.target.value } : x)),
+                      )
+                    }
+                    placeholder="key"
+                  />
+                  <Input
+                    value={r.value}
+                    onChange={(e) =>
+                      setHttpHeaderRows((prev) =>
+                        prev.map((x) => (x.id === r.id ? { ...x, value: e.target.value } : x)),
+                      )
+                    }
+                    placeholder="value"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => setHttpHeaderRows((prev) => prev.filter((x) => x.id !== r.id))}
+                    aria-label="删除"
+                  >
+                    ×
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+          {httpMethod !== 'GET' && (
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center gap-2">
+                <Label className="mb-0">请求体（可选）</Label>
+                <InsertVariableMenu
+                  variableGroups={variableGroups}
+                  placeholder="插入变量"
+                  onInsert={(tmpl) => setHttpBody((prev) => prev + tmpl)}
+                />
+              </div>
+              <Textarea
+                value={httpBody}
+                onChange={(e) => setHttpBody(e.target.value)}
+                placeholder='{"key": "{{inputs.message}}" }'
+                rows={4}
+                className={textareaClassName}
+              />
+            </div>
+          )}
+          <div className="rounded-lg bg-primary/10 p-2 text-xs text-primary">
+            <strong>传给下游：</strong>
+            <code>{`{{${node.id}.data}}`}</code>、<code>{`{{${node.id}.status}}`}</code>、<code>{`{{${node.id}.raw}}`}</code>
+          </div>
+        </>
+      )}
+
+      {node.type === 'condition_if' && (
+        <>
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center gap-2">
+              <Label className="mb-0">条件表达式</Label>
+              <InsertVariableMenu
+                variableGroups={variableGroups}
+                placeholder="插入变量"
+                onInsert={(tmpl) => setCondIfExpression((prev) => prev + tmpl)}
+              />
+            </div>
+            <Input
+              value={condIfExpression}
+              onChange={(e) => setCondIfExpression(e.target.value)}
+              placeholder="{{inputs.score}} > 60"
+              className={inputClassName}
+            />
+            <span className="text-xs text-muted-foreground">
+              支持比较：{'>'} {'<'}{' '}
+              {'>='} {'<='} == !=，如 <code>{'{{inputs.score}} > 60'}</code>
+            </span>
+          </div>
+          <div className="text-xs text-muted-foreground">
+            连接「是」handle 到 true 分支，「否」handle 到 false 分支
+          </div>
+        </>
+      )}
+
+      {node.type === 'condition_switch' && (
+        <>
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center gap-2">
+              <Label className="mb-0">匹配变量</Label>
+              <InsertVariableMenu
+                variableGroups={variableGroups}
+                placeholder="插入变量"
+                onInsert={(tmpl) => setCondSwitchVariable((prev) => prev + tmpl)}
+              />
+            </div>
+            <Input
+              value={condSwitchVariable}
+              onChange={(e) => setCondSwitchVariable(e.target.value)}
+              placeholder="{{inputs.type}}"
+              className={inputClassName}
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <Label className="mb-0">分支</Label>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  setCondSwitchCases((prev) =>
+                    prev.concat({ id: `case-${prev.length}`, value: '', outputKey: `case${prev.length}` }),
+                  )
+                }
+              >
+                + 添加
+              </Button>
+            </div>
+            {condSwitchCases.map((c) => (
+              <div key={c.id} className="grid grid-cols-[1fr_1fr_auto] items-center gap-2">
+                <Input
+                  value={c.value}
+                  onChange={(e) =>
+                    setCondSwitchCases((prev) =>
+                      prev.map((x) => (x.id === c.id ? { ...x, value: e.target.value } : x)),
+                    )
+                  }
+                  placeholder="匹配值"
+                />
+                <Input
+                  value={c.outputKey}
+                  onChange={(e) =>
+                    setCondSwitchCases((prev) =>
+                      prev.map((x) => (x.id === c.id ? { ...x, outputKey: e.target.value } : x)),
+                    )
+                  }
+                  placeholder="handle ID"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setCondSwitchCases((prev) => prev.filter((x) => x.id !== c.id))}
+                  aria-label="删除"
+                >
+                  ×
+                </Button>
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>默认分支 handle</Label>
+            <Input
+              value={condSwitchDefault}
+              onChange={(e) => setCondSwitchDefault(e.target.value)}
+              placeholder="__default__"
+              className={inputClassName}
+            />
+            <span className="text-xs text-muted-foreground">
+              无匹配时走此分支，需与下方连线 targetHandle 对应
+            </span>
+          </div>
+        </>
+      )}
+
       <Button type="button" onClick={handleApply}>
         应用
       </Button>

@@ -104,7 +104,7 @@ export function WorkflowEditor({
   }, [workflowId, nodes, edges, onSave]);
 
   const addNode = useCallback(
-    (type: 'start' | 'end' | 'plain' | 'ai' | 'input' | 'output') => {
+    (type: 'start' | 'end' | 'plain' | 'ai' | 'input' | 'output' | 'http' | 'condition_if' | 'condition_switch') => {
       const id = `${type}-${Date.now()}`;
       const y = nodes.length * 120;
       const defaultData: Record<string, unknown> =
@@ -128,6 +128,31 @@ export function WorkflowEditor({
                     label: '输出',
                     outputMapping: { result: '{{inputs.message}}' },
                   }
+            : type === 'http'
+              ? {
+                  label: 'HTTP',
+                  method: 'GET',
+                  url: 'https://api.example.com',
+                  headers: {},
+                  body: '',
+                }
+            : type === 'condition_if'
+              ? {
+                  label: '条件分支',
+                  expression: '{{inputs.score}} > 60',
+                  trueOutput: 'true',
+                  falseOutput: 'false',
+                }
+            : type === 'condition_switch'
+              ? {
+                  label: '多分支',
+                  variable: '{{inputs.type}}',
+                  cases: [
+                    { value: 'a', outputKey: 'a' },
+                    { value: 'b', outputKey: 'b' },
+                  ],
+                  defaultOutput: '__default__',
+                }
             : {};
       setNodes((nds) =>
         nds.concat({
@@ -165,6 +190,15 @@ export function WorkflowEditor({
         </Button>
         <Button type="button" variant="outline" size="sm" onClick={() => addNode('output')}>
           添加输出
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={() => addNode('http')}>
+          HTTP
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={() => addNode('condition_if')}>
+          条件分支
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={() => addNode('condition_switch')}>
+          多分支
         </Button>
         <Button type="button" variant="outline" size="sm" onClick={() => addNode('end')}>
           添加结束

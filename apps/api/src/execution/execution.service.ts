@@ -4,7 +4,13 @@ import { AiService } from '../ai/ai.service';
 
 interface WorkflowGraph {
   nodes: Array<{ id: string; type: string; data: Record<string, unknown> }>;
-  edges: Array<{ id: string; source: string; target: string }>;
+  edges: Array<{
+    id: string;
+    source: string;
+    target: string;
+    sourceHandle?: string | null;
+    targetHandle?: string | null;
+  }>;
 }
 
 interface AINodeData {
@@ -20,6 +26,25 @@ interface InputNodeData {
 
 interface OutputNodeData {
   outputMapping?: Record<string, unknown>;
+}
+
+interface HttpNodeData {
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  url?: string;
+  headers?: Record<string, string>;
+  body?: string;
+}
+
+interface ConditionIfData {
+  expression?: string;
+  trueOutput?: string;
+  falseOutput?: string;
+}
+
+interface ConditionSwitchData {
+  variable?: string;
+  cases?: Array<{ value: string; outputKey: string }>;
+  defaultOutput?: string;
 }
 
 interface NodeLogEntry {
@@ -127,14 +152,28 @@ export class ExecutionService {
     const nodeOutputs: Record<string, { output: Record<string, unknown>; error?: string }> = {};
     const context: Record<string, unknown> = { inputs: initialInputs, ...initialInputs };
     const explicitOutputs: Record<string, unknown> = {};
+    const conditionChosenHandle: Record<string, string> = {};
 
     for (const nodeId of sorted) {
       const node = graph.nodes.find((n) => n.id === nodeId);
       if (!node) continue;
 
       const startedAt = new Date();
-      const incoming = this.getIncomingData(graph, nodeId, nodeOutputs);
+      const incoming = this.getIncomingData(
+        graph,
+        nodeId,
+        nodeOutputs,
+        conditionChosenHandle,
+      );
       const input = { ...context, ...incoming };
+
+      if (
+        node.type !== 'start' &&
+        node.type !== 'trigger' &&
+        !this.isNodeReachable(graph, nodeId, nodeOutputs, conditionChosenHandle)
+      ) {
+        continue;
+      }
 
       if (node.type === 'start' || node.type === 'trigger' || node.type === 'plain') {
         nodeOutputs[nodeId] = { output: input };
@@ -234,6 +273,60 @@ export class ExecutionService {
         continue;
       }
 
+      if (node.type === 'http') {
+        try {
+          const httpData = (node.data || {}) as HttpNodeData;
+          const method = (httpData.method || 'GET') as 'GET' | 'POST' | 'PUT' | 'DELETE';
+          const urlRaw = String(httpData.url || '');
+          const url = String(this.resolveValue(urlRaw, context));
+          const headersRaw = (httpData.headers || {}) as Record<string, string>;
+          const headers: Record<string, string> = {};
+          for (const [k, v] of Object.entries(headersRaw)) {
+            headers[k] = String(this.resolveValue(v, context));
+          }
+          const bodyRaw = httpData.body;
+          const body =
+            bodyRaw != null && bodyRaw !== ''
+              ? String(this.resolveValue(bodyRaw, context))
+              : undefined;
+          const res = await fetch(url, {
+            method,
+            headers: Object.keys(headers).length > 0 ? headers : undefined,
+            body: method !== 'GET' && body ? body : undefined,
+          });
+          const text = await res.text();
+          let output: Record<string, unknown>;
+          try {
+            output = { status: res.status, data: JSON.parse(text), raw: text };
+          } catch {
+            output = { status: res.status, data: text, raw: text };
+          }
+          nodeOutputs[nodeId] = { output };
+          Object.assign(context, { [nodeId]: output });
+          nodeLogs.push({
+            nodeId,
+            startedAt,
+            finishedAt: new Date(),
+            status: 'success',
+            input,
+            output,
+          });
+        } catch (e) {
+          const errMsg = e instanceof Error ? e.message : String(e);
+          nodeOutputs[nodeId] = { output: {}, error: errMsg };
+          nodeLogs.push({
+            nodeId,
+            startedAt,
+            finishedAt: new Date(),
+            status: 'failed',
+            input,
+            error: errMsg,
+          });
+          throw e;
+        }
+        continue;
+      }
+
       if (node.type === 'ai') {
         try {
           const aiData = (node.data || {}) as AINodeData;
@@ -283,6 +376,85 @@ export class ExecutionService {
         continue;
       }
 
+      if (node.type === 'condition_if') {
+        try {
+          const condData = (node.data || {}) as ConditionIfData;
+          const expr = String(condData.expression ?? 'false');
+          const result = this.evaluateExpression(expr, context);
+          const chosen = result ? 'true' : 'false';
+          conditionChosenHandle[nodeId] = chosen;
+          const output = { branch: chosen, result };
+          nodeOutputs[nodeId] = { output };
+          Object.assign(context, { [nodeId]: output });
+          nodeLogs.push({
+            nodeId,
+            startedAt,
+            finishedAt: new Date(),
+            status: 'success',
+            input,
+            output,
+          });
+        } catch (e) {
+          const errMsg = e instanceof Error ? e.message : String(e);
+          nodeOutputs[nodeId] = { output: {}, error: errMsg };
+          conditionChosenHandle[nodeId] = 'false';
+          nodeLogs.push({
+            nodeId,
+            startedAt,
+            finishedAt: new Date(),
+            status: 'failed',
+            input,
+            error: errMsg,
+          });
+          throw e;
+        }
+        continue;
+      }
+
+      if (node.type === 'condition_switch') {
+        try {
+          const switchData = (node.data || {}) as ConditionSwitchData;
+          const variablePath = String(switchData.variable ?? '').trim().replace(/^\{\{|\}\}$/g, '').trim();
+          const cases = (switchData.cases || []) as Array<{ value: string; outputKey: string }>;
+          const defaultKey = String(switchData.defaultOutput ?? '__default__');
+          const variableValue = this.getByPath(context, variablePath);
+          const valueStr = variableValue != null ? String(variableValue) : '';
+          let chosen = defaultKey;
+          for (const c of cases) {
+            if (String(c.value) === valueStr) {
+              chosen = c.outputKey;
+              break;
+            }
+          }
+          conditionChosenHandle[nodeId] = chosen;
+          const output = { branch: chosen, value: variableValue };
+          nodeOutputs[nodeId] = { output };
+          Object.assign(context, { [nodeId]: output });
+          nodeLogs.push({
+            nodeId,
+            startedAt,
+            finishedAt: new Date(),
+            status: 'success',
+            input,
+            output,
+          });
+        } catch (e) {
+          const errMsg = e instanceof Error ? e.message : String(e);
+          nodeOutputs[nodeId] = { output: {}, error: errMsg };
+          conditionChosenHandle[nodeId] = '__default__';
+          nodeLogs.push({
+            nodeId,
+            startedAt,
+            finishedAt: new Date(),
+            status: 'failed',
+            input,
+            error: errMsg,
+          });
+          throw e;
+        }
+        continue;
+      }
+
       nodeOutputs[nodeId] = { output: input };
       Object.assign(context, { [nodeId]: input });
       nodeLogs.push({
@@ -295,6 +467,22 @@ export class ExecutionService {
       });
     }
     return { nodeOutputs, explicitOutputs };
+  }
+
+  private evaluateExpression(expr: string, context: Record<string, unknown>): boolean {
+    const replaced = expr.replace(/\{\{([^}]+)\}\}/g, (_, path: string) => {
+      const v = this.getByPath(context, path.trim());
+      if (v === true || v === false) return String(v);
+      if (v == null) return 'null';
+      if (typeof v === 'number') return String(v);
+      return JSON.stringify(String(v));
+    });
+    try {
+      const fn = new Function('return !!(' + replaced + ')');
+      return fn();
+    } catch {
+      return false;
+    }
   }
 
   private getByPath(context: Record<string, unknown>, path: string): unknown {
@@ -343,14 +531,45 @@ export class ExecutionService {
     return result;
   }
 
+  private isNodeReachable(
+    graph: WorkflowGraph,
+    nodeId: string,
+    nodeOutputs: Record<string, { output: Record<string, unknown> }>,
+    conditionChosenHandle: Record<string, string>,
+  ): boolean {
+    const incomingEdges = graph.edges.filter((e) => e.target === nodeId);
+    if (incomingEdges.length === 0) return true;
+    for (const e of incomingEdges) {
+      const srcNode = graph.nodes.find((n) => n.id === e.source);
+      if (!nodeOutputs[e.source]) continue;
+      if (!srcNode || (srcNode.type !== 'condition_if' && srcNode.type !== 'condition_switch')) {
+        return true;
+      }
+      const chosen = conditionChosenHandle[e.source];
+      if (!chosen) continue;
+      const handle = e.sourceHandle ?? 'out';
+      if (handle === chosen) return true;
+    }
+    return false;
+  }
+
   private getIncomingData(
     graph: WorkflowGraph,
     nodeId: string,
     nodeOutputs: Record<string, { output: Record<string, unknown> }>,
+    conditionChosenHandle?: Record<string, string>,
   ): Record<string, unknown> {
     const incomingEdges = graph.edges.filter((e) => e.target === nodeId);
     const merged: Record<string, unknown> = {};
     incomingEdges.forEach((e) => {
+      const srcNode = graph.nodes.find((n) => n.id === e.source);
+      if (conditionChosenHandle && srcNode) {
+        if (srcNode.type === 'condition_if' || srcNode.type === 'condition_switch') {
+          const chosen = conditionChosenHandle[e.source];
+          const handle = e.sourceHandle ?? 'out';
+          if (chosen !== handle) return;
+        }
+      }
       const out = nodeOutputs[e.source]?.output;
       if (out) Object.assign(merged, out);
     });
