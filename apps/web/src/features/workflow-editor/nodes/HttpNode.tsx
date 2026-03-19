@@ -1,5 +1,7 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Globe } from 'lucide-react';
+import { nodeBase, nodeSubtext } from './node-styles';
 
 function HttpNode({ data }: NodeProps) {
   const label = (data?.label as string) || 'HTTP';
@@ -7,24 +9,14 @@ function HttpNode({ data }: NodeProps) {
   const url = (data?.url as string) || '';
   const displayUrl = url ? (url.length > 24 ? url.slice(0, 24) + '…' : url) : '未配置';
   return (
-    <div
-      style={{
-        padding: '12px 20px',
-        borderRadius: 8,
-        background: 'linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%)',
-        color: '#fff',
-        fontWeight: 500,
-        minWidth: 120,
-        textAlign: 'center',
-        boxShadow: '0 2px 8px rgba(14, 165, 233, 0.3)',
-      }}
-    >
-      <Handle type="target" position={Position.Top} id="in" />
-      <div>{label}</div>
-      <div style={{ fontSize: 11, opacity: 0.9, marginTop: 4 }}>
-        {method} {displayUrl}
+    <div className={`${nodeBase} bg-[#165DFF] text-white`}>
+      <Handle type="target" position={Position.Top} id="in" className="!top-[-6px]" />
+      <div className="flex items-center justify-center gap-1.5">
+        <Globe className="h-4 w-4 shrink-0" strokeWidth={2} />
+        <span>{label}</span>
       </div>
-      <Handle type="source" position={Position.Bottom} id="out" />
+      <div className={nodeSubtext}>{method} {displayUrl}</div>
+      <Handle type="source" position={Position.Bottom} id="out" className="!bottom-[-6px]" />
     </div>
   );
 }

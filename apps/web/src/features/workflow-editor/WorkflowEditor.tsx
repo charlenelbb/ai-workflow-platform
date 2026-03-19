@@ -1,7 +1,8 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import {
   ReactFlow,
   Background,
+  BackgroundVariant,
   Controls,
   MiniMap,
   addEdge,
@@ -14,6 +15,18 @@ import {
   type OnEdgesChange,
   type NodeTypes,
 } from '@xyflow/react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  Play,
+  Square,
+  Box,
+  ArrowDownToLine,
+  Sparkles,
+  ArrowUpFromLine,
+  Globe,
+  GitBranch,
+  GitCompare,
+} from 'lucide-react';
 import '@xyflow/react/dist/style.css';
 import { nodeTypes } from './node-types';
 import { NodeConfigPanel } from '@/features/node-config/NodeConfigPanel';
@@ -71,19 +84,29 @@ interface WorkflowEditorProps {
   initialGraph: WorkflowGraph | null;
   onSave: (graph: WorkflowGraph) => Promise<void>;
   onRun?: () => void;
+  /** 外部触发保存时递增此值（如 TopNavBar 点击保存） */
+  triggerSaveToken?: number;
+  onSavingChange?: (v: boolean) => void;
 }
 
 export function WorkflowEditor({
   workflowId,
   initialGraph,
   onSave,
-  onRun,
+  triggerSaveToken = 0,
+  onSavingChange,
 }: WorkflowEditorProps) {
   const { nodes: initN, edges: initE } = graphToFlow(initialGraph);
   const [nodes, setNodes, onNodesChange] = useNodesState(initN);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initE);
-  const [saving, setSaving] = useState(false);
-  const [running, setRunning] = useState(false);
+  const [, setSavingInternal] = useState(false);
+  const setSaving = useCallback(
+    (v: boolean) => {
+      setSavingInternal(v);
+      onSavingChange?.(v);
+    },
+    [onSavingChange],
+  );
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   const selectedNode = selectedNodeId ? nodes.find((n) => n.id === selectedNodeId) ?? null : null;
@@ -102,6 +125,12 @@ export function WorkflowEditor({
       setSaving(false);
     }
   }, [workflowId, nodes, edges, onSave]);
+
+  useEffect(() => {
+    if (triggerSaveToken > 0) handleSave();
+    // 仅随外部触发 token 变化时保存，不随 handleSave 引用变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggerSaveToken]);
 
   const addNode = useCallback(
     (type: 'start' | 'end' | 'plain' | 'ai' | 'input' | 'output' | 'http' | 'condition_if' | 'condition_switch') => {
@@ -173,63 +202,49 @@ export function WorkflowEditor({
   }, [setNodes]);
 
   return (
-    <div className="flex h-screen flex-col">
-      <header className="flex items-center gap-3 border-b border-border px-4 py-2">
-        <span className="font-semibold">工作流编辑器</span>
-        <Button type="button" variant="outline" size="sm" onClick={() => addNode('start')}>
-          添加开始
+    <div className="flex h-full flex-col">
+      {/* 画布上方：仅添加节点工具栏（运行/保存已移至顶部导航栏） */}
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border bg-card px-3 py-2 shadow-sm">
+        <span className="mr-2 text-xs font-semibold text-muted-foreground">添加节点</span>
+        <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 rounded-lg" onClick={() => addNode('start')}>
+          <Play className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">开始</span>
         </Button>
-        <Button type="button" variant="outline" size="sm" onClick={() => addNode('plain')}>
-          添加节点
+        <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 rounded-lg" onClick={() => addNode('plain')}>
+          <Box className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">节点</span>
         </Button>
-        <Button type="button" variant="outline" size="sm" onClick={() => addNode('input')}>
-          添加输入
+        <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 rounded-lg" onClick={() => addNode('input')}>
+          <ArrowDownToLine className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">输入</span>
         </Button>
-        <Button type="button" variant="outline" size="sm" onClick={() => addNode('ai')}>
-          添加 AI 节点
+        <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 rounded-lg" onClick={() => addNode('ai')}>
+          <Sparkles className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">AI</span>
         </Button>
-        <Button type="button" variant="outline" size="sm" onClick={() => addNode('output')}>
-          添加输出
+        <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 rounded-lg" onClick={() => addNode('output')}>
+          <ArrowUpFromLine className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">输出</span>
         </Button>
-        <Button type="button" variant="outline" size="sm" onClick={() => addNode('http')}>
-          HTTP
+        <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 rounded-lg" onClick={() => addNode('http')}>
+          <Globe className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">HTTP</span>
         </Button>
-        <Button type="button" variant="outline" size="sm" onClick={() => addNode('condition_if')}>
-          条件分支
+        <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 rounded-lg" onClick={() => addNode('condition_if')}>
+          <GitBranch className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">条件</span>
         </Button>
-        <Button type="button" variant="outline" size="sm" onClick={() => addNode('condition_switch')}>
-          多分支
+        <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 rounded-lg" onClick={() => addNode('condition_switch')}>
+          <GitCompare className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">多分支</span>
         </Button>
-        <Button type="button" variant="outline" size="sm" onClick={() => addNode('end')}>
-          添加结束
+        <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 rounded-lg" onClick={() => addNode('end')}>
+          <Square className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">结束</span>
         </Button>
-        {workflowId && (
-          <>
-            <Button type="button" variant="secondary" size="sm" onClick={handleSave} disabled={saving}>
-              {saving ? '保存中…' : '保存'}
-            </Button>
-            {onRun && (
-              <Button
-                type="button"
-                size="sm"
-                onClick={async () => {
-                  setRunning(true);
-                  try {
-                    await onRun();
-                  } finally {
-                    setRunning(false);
-                  }
-                }}
-                disabled={running}
-              >
-                {running ? '运行中…' : '运行'}
-              </Button>
-            )}
-          </>
-        )}
-      </header>
-      <div className="flex flex-1">
-        <div className="flex-1">
+      </div>
+      <div className="relative flex flex-1 min-h-0">
+        <div className="relative flex-1 min-w-0">
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -241,19 +256,30 @@ export function WorkflowEditor({
             nodeTypes={nodeTypes}
             fitView
           >
-            <Background />
+            <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#86909C" />
             <Controls />
             <MiniMap />
           </ReactFlow>
         </div>
+        <AnimatePresence mode="wait">
         {selectedNode && (
+          <motion.div
+            key="config-panel"
+            initial={{ opacity: 0, x: 10 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 10 }}
+            transition={{ duration: 0.2 }}
+            className="shrink-0"
+          >
           <NodeConfigPanel
             node={selectedNode}
             nodes={nodes}
             onUpdate={updateNodeData}
             onClose={() => setSelectedNodeId(null)}
           />
+          </motion.div>
         )}
+        </AnimatePresence>
       </div>
     </div>
   );

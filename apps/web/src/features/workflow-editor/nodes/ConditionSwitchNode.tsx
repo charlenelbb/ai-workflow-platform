@@ -1,5 +1,7 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { GitCompare } from 'lucide-react';
+import { nodeBase, nodeSubtext } from './node-styles';
 
 function ConditionSwitchNode({ data }: NodeProps) {
   const label = (data?.label as string) || '多分支';
@@ -11,46 +13,26 @@ function ConditionSwitchNode({ data }: NodeProps) {
   const outputs = caseOutputs.length > 0 ? [...new Set([...caseOutputs, defaultKey])] : [defaultKey];
   const n = Math.max(outputs.length, 1);
   return (
-    <div
-      style={{
-        padding: '12px 20px',
-        borderRadius: 8,
-        background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
-        color: '#fff',
-        fontWeight: 500,
-        minWidth: 140,
-        textAlign: 'center',
-        boxShadow: '0 2px 8px rgba(139, 92, 246, 0.3)',
-      }}
-    >
-      <Handle type="target" position={Position.Top} id="in" />
-      <div>{label}</div>
-      <div style={{ fontSize: 10, opacity: 0.9, marginTop: 4 }}>{displayVar}</div>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-around',
-          marginTop: 8,
-          position: 'relative',
-          minHeight: 24,
-        }}
-      >
+    <div className={`${nodeBase} min-w-[140px] bg-[#722ED1] text-white`}>
+      <Handle type="target" position={Position.Top} id="in" className="!top-[-6px]" />
+      <div className="flex items-center justify-center gap-1.5">
+        <GitCompare className="h-4 w-4 shrink-0" strokeWidth={2} />
+        <span>{label}</span>
+      </div>
+      <div className={nodeSubtext}>{displayVar}</div>
+      <div className="relative mt-2 flex justify-around min-h-6">
         {outputs.map((out, i) => (
           <Handle
             key={out}
             type="source"
             position={Position.Bottom}
             id={out}
-            style={{
-              left: `${((i + 0.5) / n) * 100}%`,
-              transform: 'translateX(-50%)',
-            }}
+            className="!bottom-[-6px] !-translate-x-1/2"
+            style={{ left: `${((i + 0.5) / n) * 100}%` }}
           />
         ))}
       </div>
-      <div style={{ fontSize: 9, opacity: 0.8, marginTop: 2 }}>
-        {outputs.length} 分支
-      </div>
+      <div className={`${nodeSubtext} text-[10px]`}>{outputs.length} 分支</div>
     </div>
   );
 }

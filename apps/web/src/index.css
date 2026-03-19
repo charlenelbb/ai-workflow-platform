@@ -1,6 +1,5 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/geist";
 
 @tailwind base;
 
@@ -8,125 +7,255 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ========== 设计令牌：Dify/LangFlow 风格科技感配色 ========== */
 :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    --chart-1: oklch(0.809 0.105 251.813);
-    --chart-2: oklch(0.623 0.214 259.815);
-    --chart-3: oklch(0.546 0.245 262.881);
-    --chart-4: oklch(0.488 0.243 264.376);
-    --chart-5: oklch(0.424 0.199 265.638);
-    --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+  /* 主色：深蓝 #165DFF */
+  --primary: #165DFF;
+  --primary-hover: #0E42D2;
+  --primary-foreground: #FFFFFF;
+  /* 辅助色：青蓝 #36CFC9 */
+  --secondary: #36CFC9;
+  --secondary-foreground: #1D2129;
+  /* 中性色 */
+  --background: #F2F3F5;
+  --foreground: #1D2129;
+  --card: #FFFFFF;
+  --card-foreground: #1D2129;
+  --popover: #FFFFFF;
+  --popover-foreground: #1D2129;
+  --muted: #E5E6EB;
+  --muted-foreground: #86909C;
+  --accent: #E8F3FF;
+  --accent-foreground: #1D2129;
+  /* 列表 hover / 选中（左侧工作流列表） */
+  --list-hover: #E8F3FF;
+  --list-active: #E6F7FF;
+  --list-active-text: #165DFF;
+  /* 危险色 */
+  --destructive: #F53F3F;
+  --destructive-foreground: #FFFFFF;
+  /* 边框与输入 */
+  --border: #E5E6EB;
+  --input: #E5E6EB;
+  --ring: #165DFF;
+  /* 画布连线 */
+  --edge-stroke: #86909C;
+  --edge-selected: #165DFF;
+  /* 圆角统一 8px */
+  --radius: 0.5rem;
+  /* 阴影：轻微悬浮感 */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 12px rgba(0, 0, 0, 0.04);
+  /* 字体 */
+  --font-sans: 'Inter Variable', 'Inter', 'PingFang SC', ui-sans-serif, system-ui, sans-serif;
+  --sidebar: var(--card);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--primary);
+  --chart-1: var(--primary);
+  --chart-2: var(--secondary);
+  --chart-3: #722ED1;
+  --chart-4: #00B42A;
+  --chart-5: #F53F3F;
 }
 
 .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.809 0.105 251.813);
-    --chart-2: oklch(0.623 0.214 259.815);
-    --chart-3: oklch(0.546 0.245 262.881);
-    --chart-4: oklch(0.488 0.243 264.376);
-    --chart-5: oklch(0.424 0.199 265.638);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+  --background: #171A1D;
+  --foreground: #E5E6EB;
+  --card: #23262E;
+  --card-foreground: #E5E6EB;
+  --border: rgba(255, 255, 255, 0.08);
+  --muted: #2C3036;
+  --muted-foreground: #86909C;
+  --list-hover: rgba(22, 93, 255, 0.15);
+  --list-active: rgba(22, 93, 255, 0.2);
+  --list-active-text: #6AA1FF;
 }
 
 @theme inline {
-    --font-sans: 'Geist Variable', sans-serif;
-    --color-sidebar-ring: var(--sidebar-ring);
-    --color-sidebar-border: var(--sidebar-border);
-    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-    --color-sidebar-accent: var(--sidebar-accent);
-    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-    --color-sidebar-primary: var(--sidebar-primary);
-    --color-sidebar-foreground: var(--sidebar-foreground);
-    --color-sidebar: var(--sidebar);
-    --color-chart-5: var(--chart-5);
-    --color-chart-4: var(--chart-4);
-    --color-chart-3: var(--chart-3);
-    --color-chart-2: var(--chart-2);
-    --color-chart-1: var(--chart-1);
-    --color-ring: var(--ring);
-    --color-input: var(--input);
-    --color-border: var(--border);
-    --color-destructive: var(--destructive);
-    --color-accent-foreground: var(--accent-foreground);
-    --color-accent: var(--accent);
-    --color-muted-foreground: var(--muted-foreground);
-    --color-muted: var(--muted);
-    --color-secondary-foreground: var(--secondary-foreground);
-    --color-secondary: var(--secondary);
-    --color-primary-foreground: var(--primary-foreground);
-    --color-primary: var(--primary);
-    --color-popover-foreground: var(--popover-foreground);
-    --color-popover: var(--popover);
-    --color-card-foreground: var(--card-foreground);
-    --color-card: var(--card);
-    --color-foreground: var(--foreground);
-    --color-background: var(--background);
-    --radius-sm: calc(var(--radius) * 0.6);
-    --radius-md: calc(var(--radius) * 0.8);
-    --radius-lg: var(--radius);
-    --radius-xl: calc(var(--radius) * 1.4);
-    --radius-2xl: calc(var(--radius) * 1.8);
-    --radius-3xl: calc(var(--radius) * 2.2);
-    --radius-4xl: calc(var(--radius) * 2.6);
+  --font-sans: var(--font-sans);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) * 0.75);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) * 1.25);
+  --radius-xl: calc(var(--radius) * 1.5);
+  --radius-2xl: calc(var(--radius) * 1.5);
+  --radius-3xl: calc(var(--radius) * 2);
+  --radius-4xl: calc(var(--radius) * 2.5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    }
+  }
   body {
-    @apply bg-background text-foreground;
-    }
+    @apply bg-background text-foreground antialiased;
+    font-weight: 400;
+  }
   html {
     @apply font-sans;
-    }
+  }
+}
+
+/* 8px 网格 */
+.space-grid-1 { gap: 8px; }
+.space-grid-2 { gap: 16px; }
+.p-grid-2 { padding: 16px; }
+
+/* gap / padding 工具类：Tailwind v4/shadcn 可能未生成，在此显式定义确保生效 */
+@layer utilities {
+  /* gap */
+  .gap-0 { gap: 0; }
+  .gap-px { gap: 1px; }
+  .gap-0\.5 { gap: 0.125rem; }
+  .gap-1 { gap: 0.25rem; }
+  .gap-1\.5 { gap: 0.375rem; }
+  .gap-2 { gap: 0.5rem; }
+  .gap-2\.5 { gap: 0.625rem; }
+  .gap-3 { gap: 0.75rem; }
+  .gap-4 { gap: 1rem; }
+  .gap-5 { gap: 1.25rem; }
+  .gap-6 { gap: 1.5rem; }
+  .gap-8 { gap: 2rem; }
+  .gap-10 { gap: 2.5rem; }
+  /* padding 四边 */
+  .p-0 { padding: 0; }
+  .p-px { padding: 1px; }
+  .p-0\.5 { padding: 0.125rem; }
+  .p-1 { padding: 0.25rem; }
+  .p-1\.5 { padding: 0.375rem; }
+  .p-2 { padding: 0.5rem; }
+  .p-2\.5 { padding: 0.625rem; }
+  .p-3 { padding: 0.75rem; }
+  .p-4 { padding: 1rem; }
+  .p-5 { padding: 1.25rem; }
+  .p-6 { padding: 1.5rem; }
+  .p-8 { padding: 2rem; }
+  /* padding 水平 px */
+  .px-0 { padding-left: 0; padding-right: 0; }
+  .px-1 { padding-left: 0.25rem; padding-right: 0.25rem; }
+  .px-1\.5 { padding-left: 0.375rem; padding-right: 0.375rem; }
+  .px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
+  .px-2\.5 { padding-left: 0.625rem; padding-right: 0.625rem; }
+  .px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
+  .px-4 { padding-left: 1rem; padding-right: 1rem; }
+  .px-6 { padding-left: 1.5rem; padding-right: 1.5rem; }
+  /* padding 垂直 py */
+  .py-0 { padding-top: 0; padding-bottom: 0; }
+  .py-0\.5 { padding-top: 0.125rem; padding-bottom: 0.125rem; }
+  .py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+  .py-1\.5 { padding-top: 0.375rem; padding-bottom: 0.375rem; }
+  .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+  .py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+  .py-4 { padding-top: 1rem; padding-bottom: 1rem; }
+  /* padding 单边 pt / pr / pb / pl */
+  .pt-0 { padding-top: 0; }
+  .pt-1 { padding-top: 0.25rem; }
+  .pt-2 { padding-top: 0.5rem; }
+  .pt-3 { padding-top: 0.75rem; }
+  .pt-4 { padding-top: 1rem; }
+  .pr-0 { padding-right: 0; }
+  .pr-1 { padding-right: 0.25rem; }
+  .pr-1\.5 { padding-right: 0.375rem; }
+  .pr-2 { padding-right: 0.5rem; }
+  .pr-3 { padding-right: 0.75rem; }
+  .pr-4 { padding-right: 1rem; }
+  .pr-8 { padding-right: 2rem; }
+  .pb-0 { padding-bottom: 0; }
+  .pb-1 { padding-bottom: 0.25rem; }
+  .pb-2 { padding-bottom: 0.5rem; }
+  .pb-3 { padding-bottom: 0.75rem; }
+  .pb-4 { padding-bottom: 1rem; }
+  .pl-0 { padding-left: 0; }
+  .pl-1 { padding-left: 0.25rem; }
+  .pl-1\.5 { padding-left: 0.375rem; }
+  .pl-2 { padding-left: 0.5rem; }
+  .pl-3 { padding-left: 0.75rem; }
+  .pl-4 { padding-left: 1rem; }
+  .pl-7 { padding-left: 1.75rem; }
+}
+
+/* ========== React Flow：画布与连线 ========== */
+.react-flow__background {
+  background-color: var(--background) !important;
+}
+.react-flow__background pattern circle {
+  fill: var(--edge-stroke) !important;
+  opacity: 0.5;
+}
+.react-flow__edge-path {
+  stroke: var(--edge-stroke) !important;
+  stroke-width: 2 !important;
+  transition: stroke 0.15s ease;
+}
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--edge-selected) !important;
+}
+.react-flow__edge-textbg {
+  fill: var(--card) !important;
+}
+.react-flow__handle {
+  width: 10px !important;
+  height: 10px !important;
+  border-radius: 50% !important;
+  border: 2px solid var(--card) !important;
+  box-shadow: var(--shadow-sm) !important;
+  background: var(--primary) !important;
+}
+.react-flow__node {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.react-flow__node.selected .react-flow__node-default,
+.react-flow__node.selected .react-flow__node-input {
+  box-shadow: 0 0 0 2px var(--primary) !important;
+}
+.react-flow__controls {
+  box-shadow: var(--shadow-card) !important;
+  border-radius: 8px !important;
+  overflow: hidden;
+  border: 1px solid var(--border) !important;
+}
+.react-flow__controls-button {
+  background: var(--card) !important;
+  border: none !important;
+  border-bottom: 1px solid var(--border) !important;
+  width: 28px !important;
+  height: 28px !important;
+  color: var(--foreground) !important;
+}
+.react-flow__controls-button:hover {
+  background: var(--muted) !important;
+}
+.react-flow__minimap {
+  border-radius: 8px !important;
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+  border: 1px solid var(--border);
 }

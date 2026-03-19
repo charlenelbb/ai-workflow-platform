@@ -1,10 +1,13 @@
 import { useState, useCallback, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ScrollText, FileOutput, Code2, Plus } from 'lucide-react';
 import { WorkflowEditor } from '@/features/workflow-editor/WorkflowEditor';
 import {
   listWorkflows,
   getWorkflow,
   createWorkflow,
   updateWorkflow,
+  deleteWorkflow,
   startRun,
   getRun,
   getRunsByWorkflow,
@@ -12,14 +15,19 @@ import {
   type WorkflowListItem,
 } from '@/api/client';
 import type { WorkflowGraph } from '@/types/workflow';
+import {
+  TopNavBar,
+  CollapsibleSidePanel,
+  ResizablePanel,
+  BottomRunInput,
+  NodeCard,
+  WorkflowListRow,
+} from '@/components/layout';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 
 const defaultGraph: WorkflowGraph = {
   nodes: [
@@ -39,6 +47,10 @@ export default function App() {
   const [uiError, setUiError] = useState<string | null>(null);
   const [activeRunTab, setActiveRunTab] = useState<'logs' | 'outputs' | 'raw'>('logs');
   const [runPolling, setRunPolling] = useState(false);
+  const [editingWorkflowId, setEditingWorkflowId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const [saveTriggerToken, setSaveTriggerToken] = useState(0);
+  const [saving, setSaving] = useState(false);
 
   const loadList = useCallback(async () => {
     try {
@@ -101,6 +113,47 @@ export default function App() {
       setCurrent(updated);
     },
     [current],
+  );
+
+  const handleRename = useCallback(
+    async (id: string, newName: string) => {
+      const trimmed = newName.trim();
+      if (!trimmed) return;
+      try {
+        setUiError(null);
+        const updated = await updateWorkflow(id, { name: trimmed });
+        setWorkflows((prev) =>
+          prev.map((w) => (w.id === id ? { ...w, name: updated.name } : w)),
+        );
+        if (current?.id === id) setCurrent(updated);
+        setEditingWorkflowId(null);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setUiError(`重命名失败：${msg}`);
+      }
+    },
+    [current?.id],
+  );
+
+  const handleDelete = useCallback(
+    async (id: string) => {
+      if (!window.confirm('确定要删除此工作流吗？')) return;
+      try {
+        setUiError(null);
+        await deleteWorkflow(id);
+        setWorkflows((prev) => prev.filter((w) => w.id !== id));
+        if (current?.id === id) {
+          setCurrent(null);
+          setRunResult(null);
+          setRunHistory([]);
+        }
+        setEditingWorkflowId(null);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setUiError(`删除失败：${msg}`);
+      }
+    },
+    [current?.id],
   );
 
   const loadRunHistory = useCallback(async () => {
@@ -198,6 +251,10 @@ export default function App() {
     }
   }, []);
 
+  const triggerSave = useCallback(() => {
+    setSaveTriggerToken((t) => t + 1);
+  }, []);
+
   const nodeLogs =
     runResult && typeof runResult === 'object' && runResult != null && 'nodeLogs' in runResult
       ? ((runResult as { nodeLogs?: unknown }).nodeLogs as unknown)
@@ -206,186 +263,243 @@ export default function App() {
     runResult && typeof runResult === 'object' && runResult != null && 'outputs' in runResult
       ? (runResult as { outputs?: unknown }).outputs
       : null;
-  const runStatus = runResult && typeof runResult === 'object' && runResult != null && 'status' in runResult
-    ? (runResult as { status?: string }).status
-    : null;
+  const runStatus =
+    runResult && typeof runResult === 'object' && runResult != null && 'status' in runResult
+      ? (runResult as { status?: string }).status
+      : null;
 
-  if (loading) return <div className="p-6">加载中…</div>;
+  if (loading) {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="flex h-screen items-center justify-center bg-background"
+      >
+        <span className="text-muted-foreground">加载中…</span>
+      </motion.div>
+    );
+  }
 
   return (
-    <div className="grid h-screen grid-cols-[260px_1fr_420px]">
-      <aside className="flex flex-col overflow-auto border-r border-border p-4">
-        {uiError && (
-          <div className="mb-3 rounded-lg border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-destructive whitespace-pre-wrap">
-            {uiError}
-          </div>
-        )}
-        <Button type="button" className="mb-3 w-full font-semibold" onClick={newWorkflow}>
-          + 新建工作流
-        </Button>
-        <div className="mb-2 text-xs font-semibold text-muted-foreground">工作流</div>
-        <ScrollArea className="flex-1 pr-2">
-          <ul className="m-0 list-none p-0">
-          {workflows.map((w) => (
-            <li key={w.id}>
-              <Button
-                type="button"
-                variant={current?.id === w.id ? 'secondary' : 'ghost'}
-                className="w-full justify-start"
-                onClick={() => openWorkflow(w.id)}
-              >
-                {w.name}
-              </Button>
-            </li>
-          ))}
-          </ul>
-        </ScrollArea>
+    <div className="flex h-screen flex-col bg-background">
+      {/* 顶部：固定导航栏 */}
+      <TopNavBar
+        workflowName={current?.name ?? '未命名工作流'}
+        onWorkflowNameChange={(name) => current && handleRename(current.id, name)}
+        onSave={() => triggerSave()}
+        onRun={runWithEditorInputs}
+        hasWorkflow={!!current?.id}
+        saving={saving}
+        running={runPolling}
+      />
 
-        <Separator className="my-4" />
-        <div>
-          <Label className="mb-2 block font-semibold">运行输入（JSON）</Label>
-          <Textarea
-            value={runInputsText}
-            onChange={(e) => setRunInputsText(e.target.value)}
-            placeholder='{"message":"hello"}'
-            rows={6}
-            className="font-mono text-xs resize-y"
-          />
-          <Button
-            type="button"
-            className="mt-2.5 w-full font-semibold"
-            onClick={runWithEditorInputs}
-            disabled={!current?.id || runPolling}
-          >
-            {runPolling ? '运行中…' : '运行当前工作流'}
-          </Button>
-        </div>
-      </aside>
-      <main className="min-w-0">
-        <WorkflowEditor
-          key={current?.id ?? 'new'}
-          workflowId={current?.id ?? null}
-          initialGraph={current ? (current.graph as WorkflowGraph) : null}
-          onSave={handleSave}
-          onRun={current ? runWithEditorInputs : undefined}
-        />
-      </main>
-      <aside className="border-l border-border bg-muted/20 p-4">
-        <Card className="h-full">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base">运行面板</CardTitle>
-              {runPolling ? (
-                <Badge variant="default">运行中…</Badge>
-              ) : runResult ? (
-                <Badge variant={runStatus === 'failed' ? 'destructive' : 'secondary'}>
-                  {runStatus === 'success' ? '成功' : runStatus === 'failed' ? '失败' : '有结果'}
-                </Badge>
-              ) : (
-                <Badge variant="outline">未运行</Badge>
+      <div className="flex flex-1 min-h-0">
+        {/* 左侧：可折叠工作流列表 */}
+        <CollapsibleSidePanel side="left" width={260} defaultCollapsed={false}>
+          <div className="flex flex-col p-4 h-full gap-2">
+            <AnimatePresence mode="wait">
+              {uiError && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="mb-3 overflow-hidden rounded-lg border border-[var(--destructive)]/30 bg-[var(--destructive)]/10 p-2.5 text-xs text-[var(--destructive)] whitespace-pre-wrap"
+                >
+                  {uiError}
+                </motion.div>
               )}
-            </div>
-            <div className="mt-2 text-xs text-muted-foreground">
-              {current?.name ? `当前：${current.name}` : '请选择或新建一个工作流'}
-            </div>
-            {runHistory.length > 0 && (
-              <div className="mt-3">
-                <div className="mb-1.5 text-xs font-semibold text-muted-foreground">运行历史</div>
-                <ScrollArea className="h-20 rounded border border-border">
-                  <ul className="m-0 list-none p-1.5">
-                    {runHistory.map((r) => (
-                      <li key={r.id}>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-auto w-full justify-between px-2 py-1.5 text-xs font-normal"
-                          onClick={() => selectRunFromHistory(r.id)}
+            </AnimatePresence>
+            <Button
+              type="button"
+              className="mb-4 h-9 w-full rounded-md bg-[var(--primary)] font-semibold text-white hover:bg-[var(--primary-hover)]"
+              onClick={newWorkflow}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              新建工作流
+            </Button>
+            <h2 className="mb-2 text-base font-bold text-foreground">工作流</h2>
+            <ScrollArea className="flex-1 pr-2">
+              <ul className="m-0 flex flex-col gap-0.5 list-none p-0">
+                {workflows.map((w) => (
+                  <WorkflowListRow
+                    key={w.id}
+                    workflow={w}
+                    isSelected={current?.id === w.id}
+                    isEditing={editingWorkflowId === w.id}
+                    editingName={editingName}
+                    onSelect={() => openWorkflow(w.id)}
+                    onDelete={() => handleDelete(w.id)}
+                    onStartEdit={() => {
+                      setEditingWorkflowId(w.id);
+                      setEditingName(w.name);
+                    }}
+                    onEditingNameChange={setEditingName}
+                    onEditingKeyDown={(e: React.KeyboardEvent) => {
+                      if (e.key === 'Enter') handleRename(w.id, editingName);
+                      if (e.key === 'Escape') setEditingWorkflowId(null);
+                    }}
+                    onEditingBlur={() => {
+                      if (editingName.trim()) handleRename(w.id, editingName);
+                      else setEditingWorkflowId(null);
+                    }}
+                  />
+                ))}
+              </ul>
+            </ScrollArea>
+          </div>
+        </CollapsibleSidePanel>
+
+        {/* 中间：画布 */}
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <WorkflowEditor
+            key={current?.id ?? 'new'}
+            workflowId={current?.id ?? null}
+            initialGraph={current ? (current.graph as WorkflowGraph) : null}
+            onSave={handleSave}
+            onRun={current ? runWithEditorInputs : undefined}
+            triggerSaveToken={saveTriggerToken}
+            onSavingChange={setSaving}
+          />
+        </main>
+
+        {/* 右侧：可拖拽调整宽度的运行面板，默认 320px */}
+        <ResizablePanel side="right" defaultWidth={320}>
+          <div className="flex h-full flex-col border-l border-border bg-card">
+            <CardHeader className="shrink-0 p-4 pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-bold">运行面板</CardTitle>
+                <Badge
+                  variant="outline"
+                  className={
+                    runPolling
+                      ? 'border-[var(--primary)] bg-[var(--primary)]/10 text-[var(--primary)]'
+                      : runResult
+                        ? runStatus === 'failed'
+                          ? 'border-[var(--destructive)] bg-[var(--destructive)]/10 text-[var(--destructive)]'
+                          : runStatus === 'success'
+                            ? 'border-[#00B42A] bg-[#00B42A]/10 text-[#00B42A]'
+                            : 'border-[var(--muted-foreground)] text-muted-foreground'
+                        : 'border-[var(--muted-foreground)] text-muted-foreground'
+                  }
+                >
+                  {runPolling ? '运行中…' : runResult ? (runStatus === 'success' ? '成功' : runStatus === 'failed' ? '失败' : '有结果') : '未运行'}
+                </Badge>
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {current?.name ? `当前：${current.name}` : '请选择或新建一个工作流'}
+              </p>
+              {runHistory.length > 0 && (
+                <div className="mt-3">
+                  <div className="mb-1.5 text-xs font-semibold text-muted-foreground">运行历史</div>
+                  <ScrollArea className="h-20 rounded-lg border border-border">
+                    <ul className="m-0 list-none p-2">
+                      {runHistory.map((r, i) => (
+                        <motion.li
+                          key={r.id}
+                          initial={{ opacity: 0, x: 4 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: i * 0.02 }}
                         >
-                          <span className="truncate font-mono">{r.id.slice(0, 8)}…</span>
-                          <Badge
-                            variant={r.status === 'failed' ? 'destructive' : r.status === 'success' ? 'secondary' : 'outline'}
-                            className="ml-1 shrink-0 text-[10px]"
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-auto w-full justify-between rounded-md px-2 py-2 text-xs font-normal hover:bg-[var(--muted)]"
+                            onClick={() => selectRunFromHistory(r.id)}
                           >
-                            {r.status}
-                          </Badge>
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                </ScrollArea>
-              </div>
-            )}
-          </CardHeader>
-          <CardContent className="h-[calc(100%-84px)]">
-            <Tabs value={activeRunTab} onValueChange={(v) => setActiveRunTab(v as typeof activeRunTab)} className="h-full">
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="logs">日志</TabsTrigger>
-                <TabsTrigger value="outputs">Outputs</TabsTrigger>
-                <TabsTrigger value="raw">Raw</TabsTrigger>
-              </TabsList>
-              <div className="mt-3 h-[calc(100%-44px)]">
-                <TabsContent value="logs" className="m-0 h-full">
-                  <ScrollArea className="h-full pr-3">
-                    {Array.isArray(nodeLogs) ? (
-                      <div className="flex flex-col gap-2">
-                        {(nodeLogs as Array<{ nodeId: string; status: string; input?: unknown; output?: unknown; error?: string }>).map(
-                          (log, i) => (
-                            <div
-                              key={i}
-                              className={`rounded-lg border p-3 ${
-                                log.status === 'failed'
-                                  ? 'border-destructive/40 bg-destructive/10'
-                                  : 'border-border bg-card'
-                              }`}
+                            <span className="truncate font-mono">{r.id.slice(0, 8)}…</span>
+                            <Badge
+                              variant="outline"
+                              className={
+                                r.status === 'failed'
+                                  ? 'border-[var(--destructive)] text-[var(--destructive)]'
+                                  : r.status === 'success'
+                                    ? 'border-[#00B42A] text-[#00B42A]'
+                                    : 'text-muted-foreground'
+                              }
                             >
-                              <div className="mb-2 flex items-center justify-between">
-                                <div className="font-mono text-xs font-semibold">{log.nodeId}</div>
-                                <Badge variant={log.status === 'failed' ? 'destructive' : 'secondary'}>
-                                  {log.status}
-                                </Badge>
-                              </div>
-                              {log.error && <div className="mb-2 text-xs text-destructive">{log.error}</div>}
-                              <details className="mb-2">
-                                <summary className="cursor-pointer text-xs text-muted-foreground">输入</summary>
-                                <pre className="mt-2 whitespace-pre-wrap rounded-md bg-muted/50 p-2 text-[11px]">
-                                  {JSON.stringify(log.input ?? {}, null, 2)}
-                                </pre>
-                              </details>
-                              <details>
-                                <summary className="cursor-pointer text-xs text-muted-foreground">输出</summary>
-                                <pre className="mt-2 whitespace-pre-wrap rounded-md bg-muted/50 p-2 text-[11px]">
-                                  {JSON.stringify(log.output ?? {}, null, 2)}
-                                </pre>
-                              </details>
-                            </div>
-                          ),
-                        )}
+                              {r.status}
+                            </Badge>
+                          </Button>
+                        </motion.li>
+                      ))}
+                    </ul>
+                  </ScrollArea>
+                </div>
+              )}
+            </CardHeader>
+            <CardContent className="flex flex-1 flex-col overflow-hidden p-4 pt-0">
+              {/* 下划线式标签页 */}
+              <Tabs
+                value={activeRunTab}
+                onValueChange={(v) => setActiveRunTab(v as typeof activeRunTab)}
+                className="flex h-full flex-col"
+              >
+                <TabsList variant="line" className="h-9 w-full justify-start rounded-none border-b border-border bg-transparent p-0">
+                  <TabsTrigger value="logs" className="gap-1.5 rounded-none border-b-2 border-transparent data-active:border-[var(--primary)] data-active:text-[var(--primary)] data-active:shadow-none">
+                    <ScrollText className="h-3.5 w-3.5" />
+                    日志
+                  </TabsTrigger>
+                  <TabsTrigger value="outputs" className="gap-1.5 rounded-none border-b-2 border-transparent data-active:border-[var(--primary)] data-active:text-[var(--primary)]">
+                    <FileOutput className="h-3.5 w-3.5" />
+                    Outputs
+                  </TabsTrigger>
+                  <TabsTrigger value="raw" className="gap-1.5 rounded-none border-b-2 border-transparent data-active:border-[var(--primary)] data-active:text-[var(--primary)]">
+                    <Code2 className="h-3.5 w-3.5" />
+                    Raw
+                  </TabsTrigger>
+                </TabsList>
+                <div className="mt-3 flex-1 min-h-0">
+                  <TabsContent value="logs" className="m-0 h-full data-[state=inactive]:hidden">
+                    <ScrollArea className="h-full pr-2">
+                      {Array.isArray(nodeLogs) ? (
+                        <div className="flex flex-col gap-2">
+                          {(nodeLogs as Array<{ nodeId: string; status: string; input?: unknown; output?: unknown; error?: string }>).map(
+                            (log, i) => (
+                              <NodeCard key={i} log={log} index={i} />
+                            ),
+                          )}
+                        </div>
+                      ) : (
+                        <div className="rounded-lg border border-dashed border-border bg-[var(--muted)]/30 p-6 text-center text-sm text-muted-foreground">
+                          暂无日志。点击「运行当前工作流」开始。
+                        </div>
+                      )}
+                    </ScrollArea>
+                  </TabsContent>
+                  <TabsContent value="outputs" className="m-0 h-full data-[state=inactive]:hidden">
+                    <ScrollArea className="h-full pr-2">
+                      <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
+                        <pre className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed">
+                          {JSON.stringify(outputs ?? {}, null, 2)}
+                        </pre>
                       </div>
-                    ) : (
-                      <div className="text-sm text-muted-foreground">暂无日志。点击“运行当前工作流”开始。</div>
-                    )}
-                  </ScrollArea>
-                </TabsContent>
-                <TabsContent value="outputs" className="m-0 h-full">
-                  <ScrollArea className="h-full pr-3">
-                    <pre className="whitespace-pre-wrap rounded-lg bg-card p-3 text-[11px]">
-                      {JSON.stringify(outputs ?? {}, null, 2)}
-                    </pre>
-                  </ScrollArea>
-                </TabsContent>
-                <TabsContent value="raw" className="m-0 h-full">
-                  <ScrollArea className="h-full pr-3">
-                    <pre className="whitespace-pre-wrap rounded-lg bg-card p-3 text-[11px]">
-                      {JSON.stringify(runResult ?? {}, null, 2)}
-                    </pre>
-                  </ScrollArea>
-                </TabsContent>
-              </div>
-            </Tabs>
-          </CardContent>
-        </Card>
-      </aside>
+                    </ScrollArea>
+                  </TabsContent>
+                  <TabsContent value="raw" className="m-0 h-full data-[state=inactive]:hidden">
+                    <ScrollArea className="h-full pr-2">
+                      <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
+                        <pre className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed">
+                          {JSON.stringify(runResult ?? {}, null, 2)}
+                        </pre>
+                      </div>
+                    </ScrollArea>
+                  </TabsContent>
+                </div>
+              </Tabs>
+            </CardContent>
+          </div>
+        </ResizablePanel>
+      </div>
+
+      {/* 底部：可收起的运行输入区 */}
+      <BottomRunInput
+        value={runInputsText}
+        onChange={setRunInputsText}
+        onRun={runWithEditorInputs}
+        disabled={!current?.id}
+        running={runPolling}
+      />
     </div>
   );
 }
