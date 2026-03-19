@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import type { Node } from '@xyflow/react';
+import type { Node, Edge } from '@xyflow/react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -100,23 +100,54 @@ function nodeDisplayName(n: Node): string {
   return type;
 }
 
-function buildGlobalVariableGroups(nodes: Node[], currentNodeId: string): GlobalVariableGroup[] {
-  const groups: GlobalVariableGroup[] = [
-    {
-      groupLabel: '运行输入',
-      options: [
-        { label: 'inputs（整体）', value: '{{inputs}}' },
-        { label: 'inputs.message', value: '{{inputs.message}}' },
-      ],
-    },
-  ];
+/** 从 currentNodeId 沿边反向 BFS，得到所有能到达该节点的上游节点 ID（仅能读这些节点的变量） */
+function getUpstreamNodeIds(edges: Edge[], currentNodeId: string): Set<string> {
+  const visited = new Set<string>();
+  const queue = [currentNodeId];
+  while (queue.length) {
+    const cur = queue.shift()!;
+    for (const e of edges) {
+      if (e.target !== cur) continue;
+      const src = e.source;
+      if (!visited.has(src)) {
+        visited.add(src);
+        queue.push(src);
+      }
+    }
+  }
+  return visited;
+}
+
+function buildGlobalVariableGroups(
+  nodes: Node[],
+  edges: Edge[],
+  currentNodeId: string,
+): GlobalVariableGroup[] {
+  const upstreamIds = getUpstreamNodeIds(edges, currentNodeId);
+  const groups: GlobalVariableGroup[] = [];
 
   nodes.forEach((n) => {
     if (n.id === currentNodeId) return;
+    if (!upstreamIds.has(n.id)) return; // 只展示上游节点变量，下游读不到
     const type = (n.type as string) || '';
     const name = nodeDisplayName(n);
     const hint = n.id;
-    const options: GlobalVariableOption[] = [{ label: '输出（整体）', value: `{{${n.id}}}` }];
+    const data = (n.data ?? {}) as Record<string, unknown>;
+    const options: GlobalVariableOption[] = [{ label: '整体', value: `{{${n.id}}}` }];
+    // 输入节点：assignments 各字段列在「输入节点」分类下
+    if (type === 'input') {
+      const assignments = (data.assignments ?? {}) as Record<string, unknown>;
+      Object.keys(assignments).filter(Boolean).forEach((key) => {
+        options.push({ label: key, value: `{{${key}}}` });
+      });
+    }
+    // 输出节点：outputMapping 各字段列在「输出节点」分类下
+    if (type === 'output') {
+      const outputMapping = (data.outputMapping ?? {}) as Record<string, unknown>;
+      Object.keys(outputMapping).filter(Boolean).forEach((key) => {
+        options.push({ label: key, value: `{{${key}}}` });
+      });
+    }
     if (type === 'ai') {
       options.push({ label: 'text', value: `{{${n.id}.text}}` });
       options.push({ label: 'content', value: `{{${n.id}.content}}` });
@@ -248,6 +279,7 @@ function InsertVariableMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="max-h-[320px] min-w-[280px] overflow-y-auto">
+        {variableGroups.length ===0 && <DropdownMenuItem>暂无变量</DropdownMenuItem>}
         {variableGroups.map((g, gi) => (
           <div key={`${g.groupLabel}-${gi}`}>
             <DropdownMenuGroup>
@@ -513,7 +545,7 @@ function KvRowEditor({
 }) {
   const caretRef = useRef<number>(row.value.length);
   return (
-    <div className="grid grid-cols-[110px_1fr_auto] items-start gap-2">
+    <div className="flex items-end gap-2">
       <Input value={row.key} onChange={(e) => onChange({ ...row, key: e.target.value })} placeholder="key" />
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-2">
@@ -550,11 +582,12 @@ function KvRowEditor({
 interface NodeConfigPanelProps {
   node: Node | null;
   nodes: Node[];
+  edges: Edge[];
   onUpdate: (nodeId: string, data: Record<string, unknown>) => void;
   onClose: () => void;
 }
 
-export function NodeConfigPanel({ node, nodes, onUpdate, onClose }: NodeConfigPanelProps) {
+export function NodeConfigPanel({ node, nodes, edges, onUpdate, onClose }: NodeConfigPanelProps) {
   const baseData = (node?.data ?? {}) as Record<string, unknown>;
   const [label, setLabel] = useState((baseData.label as string) ?? '');
 
@@ -565,13 +598,13 @@ export function NodeConfigPanel({ node, nodes, onUpdate, onClose }: NodeConfigPa
   );
   const [systemPrompt, setSystemPrompt] = useState(aiData.systemPrompt ?? '');
   const [userMapping, setUserMapping] = useState(
-    aiData.inputMapping?.user ?? aiData.inputMapping?.content ?? '{{inputs.message}}',
+    aiData.inputMapping?.user ?? aiData.inputMapping?.content ?? '',
   );
 
   // input
   const inputData = baseData as InputNodeData;
   const [assignmentRows, setAssignmentRows] = useState<KvRow[]>(
-    () => objectToRows(inputData.assignments ?? { message: '{{inputs.message}}' }),
+    () => objectToRows(inputData.assignments ?? { message: '' }),
   );
 
   // output
@@ -622,8 +655,8 @@ export function NodeConfigPanel({ node, nodes, onUpdate, onClose }: NodeConfigPa
   // 之前用于 textarea 选区插入的函数已不再需要（改为逐行 KV + TokenInput）。
 
   const variableGroups = useMemo(
-    () => (node && nodes.length ? buildGlobalVariableGroups(nodes, node.id) : []),
-    [node, nodes],
+    () => (node && nodes.length ? buildGlobalVariableGroups(nodes, edges, node.id) : []),
+    [node, nodes, edges],
   );
 
   const handleApply = useCallback(() => {
@@ -796,9 +829,6 @@ export function NodeConfigPanel({ node, nodes, onUpdate, onClose }: NodeConfigPa
             <span className="text-xs text-muted-foreground">
               支持 {'{{inputs.xxx}}'}、{'{{节点ID}}'}、{'{{节点ID.字段}}'}
             </span>
-          </div>
-          <div className="rounded-lg bg-primary/10 p-2 text-xs text-primary">
-            <strong>传给下游：</strong>使用 <code>{`{{${node.id}.text}}`}</code> 或 <code>{`{{${node.id}.content}}`}</code>（本节点 ID：<code>{node.id}</code>）
           </div>
         </>
       )}

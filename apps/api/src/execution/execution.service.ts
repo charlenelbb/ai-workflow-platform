@@ -139,7 +139,7 @@ export class ExecutionService {
     });
 
     try {
-      const { nodeOutputs, explicitOutputs } = await this.executeGraph(graph, inputs, nodeLogs);
+      const { nodeOutputs, explicitOutputs } = await this.executeGraph(graph, inputs, nodeLogs, runId);
       const outputs =
         explicitOutputs && Object.keys(explicitOutputs).length > 0
           ? explicitOutputs
@@ -186,25 +186,55 @@ export class ExecutionService {
     }
   }
 
+  /** 将当前 nodeLogs 写入 run 记录，用于前端轮询时实时看到日志 */
+  private async persistNodeLogs(runId: string, nodeLogs: NodeLogEntry[]): Promise<void> {
+    const logsForDb = nodeLogs.map((l) => ({
+      nodeId: l.nodeId,
+      startedAt: l.startedAt.toISOString(),
+      finishedAt: l.finishedAt?.toISOString(),
+      status: l.status,
+      input: l.input as object | undefined,
+      output: l.output as object | undefined,
+      error: l.error,
+    }));
+    await this.prisma.runRecord.update({
+      where: { id: runId },
+      data: { nodeLogs: logsForDb as object },
+    });
+  }
+
   private async executeGraph(
     graph: WorkflowGraph,
     initialInputs: Record<string, unknown>,
     nodeLogs: NodeLogEntry[],
+    runId?: string,
   ): Promise<{
     nodeOutputs: Record<string, { output: Record<string, unknown>; error?: string }>;
     explicitOutputs: Record<string, unknown>;
   }> {
     const sorted = this.topologicalSort(graph);
     const nodeOutputs: Record<string, { output: Record<string, unknown>; error?: string }> = {};
-    const context: Record<string, unknown> = { inputs: initialInputs, ...initialInputs };
     const explicitOutputs: Record<string, unknown> = {};
     const conditionChosenHandle: Record<string, string> = {};
+    const pushLog = async (entry: NodeLogEntry) => {
+      nodeLogs.push(entry);
+      if (runId) await this.persistNodeLogs(runId, nodeLogs);
+    };
 
     for (const nodeId of sorted) {
       const node = graph.nodes.find((n) => n.id === nodeId);
       if (!node) continue;
 
       const startedAt = new Date();
+      // 每个节点只能读取上游节点变量（沿边能到达本节点且在拓扑序中排在本节点之前的节点）
+      const context = this.buildContextForNode(
+        graph,
+        nodeId,
+        sorted,
+        initialInputs,
+        nodeOutputs,
+        conditionChosenHandle,
+      );
       const incoming = this.getIncomingData(
         graph,
         nodeId,
@@ -223,8 +253,7 @@ export class ExecutionService {
 
       if (node.type === 'start' || node.type === 'trigger' || node.type === 'plain') {
         nodeOutputs[nodeId] = { output: input };
-        Object.assign(context, input);
-        nodeLogs.push({
+        await pushLog({
           nodeId,
           startedAt,
           finishedAt: new Date(),
@@ -236,8 +265,7 @@ export class ExecutionService {
       }
       if (node.type === 'end') {
         nodeOutputs[nodeId] = { output: input };
-        Object.assign(context, input);
-        nodeLogs.push({
+        await pushLog({
           nodeId,
           startedAt,
           finishedAt: new Date(),
@@ -257,9 +285,7 @@ export class ExecutionService {
             output[k] = this.resolveValue(expr, context);
           }
           nodeOutputs[nodeId] = { output: output as Record<string, unknown> };
-          Object.assign(context, output);
-          Object.assign(context, { [nodeId]: output });
-          nodeLogs.push({
+          await pushLog({
             nodeId,
             startedAt,
             finishedAt: new Date(),
@@ -270,7 +296,7 @@ export class ExecutionService {
         } catch (e) {
           const errMsg = e instanceof Error ? e.message : String(e);
           nodeOutputs[nodeId] = { output: {}, error: errMsg };
-          nodeLogs.push({
+          await pushLog({
             nodeId,
             startedAt,
             finishedAt: new Date(),
@@ -294,8 +320,7 @@ export class ExecutionService {
             explicitOutputs[k] = v;
           }
           nodeOutputs[nodeId] = { output: out as Record<string, unknown> };
-          Object.assign(context, { [nodeId]: out });
-          nodeLogs.push({
+          await pushLog({
             nodeId,
             startedAt,
             finishedAt: new Date(),
@@ -306,7 +331,7 @@ export class ExecutionService {
         } catch (e) {
           const errMsg = e instanceof Error ? e.message : String(e);
           nodeOutputs[nodeId] = { output: {}, error: errMsg };
-          nodeLogs.push({
+          await pushLog({
             nodeId,
             startedAt,
             finishedAt: new Date(),
@@ -348,8 +373,7 @@ export class ExecutionService {
             output = { status: res.status, data: text, raw: text };
           }
           nodeOutputs[nodeId] = { output };
-          Object.assign(context, { [nodeId]: output });
-          nodeLogs.push({
+          await pushLog({
             nodeId,
             startedAt,
             finishedAt: new Date(),
@@ -360,7 +384,7 @@ export class ExecutionService {
         } catch (e) {
           const errMsg = e instanceof Error ? e.message : String(e);
           nodeOutputs[nodeId] = { output: {}, error: errMsg };
-          nodeLogs.push({
+          await pushLog({
             nodeId,
             startedAt,
             finishedAt: new Date(),
@@ -397,8 +421,7 @@ export class ExecutionService {
           });
           const output = { text, content: text };
           nodeOutputs[nodeId] = { output };
-          Object.assign(context, { [nodeId]: output });
-          nodeLogs.push({
+          await pushLog({
             nodeId,
             startedAt,
             finishedAt: new Date(),
@@ -409,7 +432,7 @@ export class ExecutionService {
         } catch (e) {
           const errMsg = e instanceof Error ? e.message : String(e);
           nodeOutputs[nodeId] = { output: {}, error: errMsg };
-          nodeLogs.push({
+          await pushLog({
             nodeId,
             startedAt,
             finishedAt: new Date(),
@@ -431,8 +454,7 @@ export class ExecutionService {
           conditionChosenHandle[nodeId] = chosen;
           const output = { branch: chosen, result };
           nodeOutputs[nodeId] = { output };
-          Object.assign(context, { [nodeId]: output });
-          nodeLogs.push({
+          await pushLog({
             nodeId,
             startedAt,
             finishedAt: new Date(),
@@ -444,7 +466,7 @@ export class ExecutionService {
           const errMsg = e instanceof Error ? e.message : String(e);
           nodeOutputs[nodeId] = { output: {}, error: errMsg };
           conditionChosenHandle[nodeId] = 'false';
-          nodeLogs.push({
+          await pushLog({
             nodeId,
             startedAt,
             finishedAt: new Date(),
@@ -475,8 +497,7 @@ export class ExecutionService {
           conditionChosenHandle[nodeId] = chosen;
           const output = { branch: chosen, value: variableValue };
           nodeOutputs[nodeId] = { output };
-          Object.assign(context, { [nodeId]: output });
-          nodeLogs.push({
+          await pushLog({
             nodeId,
             startedAt,
             finishedAt: new Date(),
@@ -488,7 +509,7 @@ export class ExecutionService {
           const errMsg = e instanceof Error ? e.message : String(e);
           nodeOutputs[nodeId] = { output: {}, error: errMsg };
           conditionChosenHandle[nodeId] = '__default__';
-          nodeLogs.push({
+          await pushLog({
             nodeId,
             startedAt,
             finishedAt: new Date(),
@@ -502,8 +523,7 @@ export class ExecutionService {
       }
 
       nodeOutputs[nodeId] = { output: input };
-      Object.assign(context, { [nodeId]: input });
-      nodeLogs.push({
+      await pushLog({
         nodeId,
         startedAt,
         finishedAt: new Date(),
@@ -597,6 +617,67 @@ export class ExecutionService {
       if (handle === chosen) return true;
     }
     return false;
+  }
+
+  /**
+   * 从 nodeId 反向沿边遍历，得到所有能到达该节点的上游节点（条件节点只沿已选分支）。
+   * 仅返回拓扑序中排在 nodeId 之前的节点，避免环或反向边导致读到下游变量。
+   */
+  private getUpstreamNodeIds(
+    graph: WorkflowGraph,
+    nodeId: string,
+    sorted: string[],
+    conditionChosenHandle: Record<string, string>,
+  ): Set<string> {
+    const nodeIndex = sorted.indexOf(nodeId);
+    if (nodeIndex <= 0) return new Set();
+    const visited = new Set<string>();
+    const queue = [nodeId];
+    while (queue.length) {
+      const cur = queue.shift()!;
+      for (const e of graph.edges) {
+        if (e.target !== cur) continue;
+        const src = e.source;
+        const srcNode = graph.nodes.find((n) => n.id === src);
+        if (srcNode && (srcNode.type === 'condition_if' || srcNode.type === 'condition_switch')) {
+          const chosen = conditionChosenHandle[src];
+          const handle = e.sourceHandle ?? 'out';
+          if (chosen !== handle) continue;
+        }
+        const srcIndex = sorted.indexOf(src);
+        if (srcIndex < 0 || srcIndex >= nodeIndex) continue;
+        if (!visited.has(src)) {
+          visited.add(src);
+          queue.push(src);
+        }
+      }
+    }
+    return visited;
+  }
+
+  /** 仅用运行输入 + 上游节点输出构建当前节点的 context，无连线则读不到其他节点变量。严禁包含下游。 */
+  private buildContextForNode(
+    graph: WorkflowGraph,
+    nodeId: string,
+    sorted: string[],
+    initialInputs: Record<string, unknown>,
+    nodeOutputs: Record<string, { output: Record<string, unknown> }>,
+    conditionChosenHandle: Record<string, string>,
+  ): Record<string, unknown> {
+    const context: Record<string, unknown> = { inputs: initialInputs, ...initialInputs };
+    const nodeIndex = sorted.indexOf(nodeId);
+    const upstream = this.getUpstreamNodeIds(graph, nodeId, sorted, conditionChosenHandle);
+    for (const mid of upstream) {
+      // 严格只允许拓扑序中排在本节点之前的节点，防止下游变量被读到
+      const midIndex = sorted.indexOf(mid);
+      if (mid === nodeId || midIndex < 0 || midIndex >= nodeIndex) continue;
+      const out = nodeOutputs[mid]?.output;
+      if (out) {
+        Object.assign(context, out);
+        context[mid] = out;
+      }
+    }
+    return context;
   }
 
   private getIncomingData(

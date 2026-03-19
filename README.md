@@ -65,7 +65,7 @@ npm run dev
 docker compose up -d postgres redis
 ```
 
-- **PostgreSQL**：`localhost:5432`，用户/密码/库名均为 `postgres`，与 `DATABASE_URL` 一致；数据持久化在 volume `postgres_data`。
+- **PostgreSQL**：`localhost:5436`，用户/密码/库名均为 `postgres`，与 `DATABASE_URL` 一致；数据持久化在 volume `postgres_data`。
 - **Redis**：`localhost:6379`，与 `REDIS_URL` 一致；数据持久化在 volume `redis_data`。
 
 停止：`docker compose down`（加 `-v` 会删除数据）。

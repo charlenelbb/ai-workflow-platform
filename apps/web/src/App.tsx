@@ -19,7 +19,6 @@ import {
   TopNavBar,
   CollapsibleSidePanel,
   ResizablePanel,
-  BottomRunInput,
   NodeCard,
   WorkflowListRow,
 } from '@/components/layout';
@@ -31,10 +30,20 @@ import { Badge } from '@/components/ui/badge';
 
 const defaultGraph: WorkflowGraph = {
   nodes: [
-    { id: 'start', type: 'start', position: { x: 250, y: 0 }, data: {} },
-    { id: 'end', type: 'end', position: { x: 250, y: 300 }, data: {} },
+    {
+      id: 'input-default',
+      type: 'input',
+      position: { x: 250, y: 0 },
+      data: { label: '输入', assignments: { message: '' } },
+    },
+    {
+      id: 'output-default',
+      type: 'output',
+      position: { x: 250, y: 200 },
+      data: { label: '输出', outputMapping: { result: '{{input-default.message}}' } },
+    },
   ],
-  edges: [{ id: 'e1', source: 'start', target: 'end' }],
+  edges: [{ id: 'e1', source: 'input-default', target: 'output-default' }],
 };
 
 export default function App() {
@@ -43,10 +52,11 @@ export default function App() {
   const [runResult, setRunResult] = useState<unknown>(null);
   const [runHistory, setRunHistory] = useState<Array<{ id: string; status: string; startedAt: string }>>([]);
   const [loading, setLoading] = useState(true);
-  const [runInputsText, setRunInputsText] = useState<string>('{}');
   const [uiError, setUiError] = useState<string | null>(null);
   const [activeRunTab, setActiveRunTab] = useState<'logs' | 'outputs' | 'raw'>('logs');
   const [runPolling, setRunPolling] = useState(false);
+  /** 当前轮询的 runId，仅用于 effect 依赖，避免因 runResult 变化导致重复建 interval、请求暴增 */
+  const [runIdToPoll, setRunIdToPoll] = useState<string | null>(null);
   const [editingWorkflowId, setEditingWorkflowId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [saveTriggerToken, setSaveTriggerToken] = useState(0);
@@ -180,9 +190,12 @@ export default function App() {
         const result = await startRun(current.id, inputs);
         setRunResult(result);
         setActiveRunTab('logs');
-        if ((result as { status?: string }).status === 'pending') {
+        const r = result as { runId?: string; status?: string };
+        if (r.status === 'pending' || r.status === 'running') {
+          setRunIdToPoll(r.runId ?? null);
           setRunPolling(true);
         } else {
+          setRunIdToPoll(null);
           loadRunHistory();
         }
       } catch (e) {
@@ -195,50 +208,45 @@ export default function App() {
     [current, loadRunHistory],
   );
 
+  // 轮询运行状态：只依赖 runPolling + runIdToPoll，避免 runResult 每次更新都重建 interval 导致请求暴增
+  const RUN_POLL_INTERVAL_MS = 2000;
+
   useEffect(() => {
-    if (!runPolling || !runResult || typeof runResult !== 'object' || !('runId' in runResult)) return;
-    const runId = (runResult as { runId?: string }).runId;
-    if (!runId) return;
-    const status = (runResult as { status?: string }).status;
-    if (status !== 'pending' && status !== 'running') {
-      setRunPolling(false);
-      loadRunHistory();
-      return;
-    }
-    const interval = setInterval(async () => {
+    if (!runPolling || !runIdToPoll) return;
+    const runId = runIdToPoll;
+
+    let cancelled = false;
+    const fetchStatus = async () => {
       try {
-        const updated = await getRun(runId);
+        const updated = await getRun(runId, true);
+        if (cancelled) return;
         const s = (updated as { status?: string }).status;
         setRunResult(updated);
         if (s === 'success' || s === 'failed') {
           setRunPolling(false);
+          setRunIdToPoll(null);
           loadRunHistory();
         }
       } catch {
-        setRunPolling(false);
+        if (!cancelled) {
+          setRunPolling(false);
+          setRunIdToPoll(null);
+        }
       }
-    }, 800);
-    return () => clearInterval(interval);
-  }, [runPolling, runResult, loadRunHistory]);
+    };
 
-  const runWithEditorInputs = useCallback(async () => {
+    fetchStatus(); // 立即请求一次
+    const interval = setInterval(fetchStatus, RUN_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [runPolling, runIdToPoll, loadRunHistory]);
+
+  const runCurrentWorkflow = useCallback(async () => {
     if (!current) return;
-    try {
-      const parsed = JSON.parse(runInputsText || '{}');
-      if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        setRunResult({ error: '运行输入必须是 JSON 对象，例如：{"message":"hello"}' });
-        setUiError('运行输入必须是 JSON 对象，例如：{"message":"hello"}');
-        setActiveRunTab('raw');
-        return;
-      }
-      await handleRun(parsed as Record<string, unknown>);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setRunResult({ error: `运行输入 JSON 解析失败: ${msg}` });
-      setUiError(`运行输入 JSON 解析失败: ${msg}`);
-      setActiveRunTab('raw');
-    }
-  }, [current, runInputsText, handleRun]);
+    await handleRun({});
+  }, [current, handleRun]);
 
   const selectRunFromHistory = useCallback(async (runId: string) => {
     try {
@@ -287,7 +295,7 @@ export default function App() {
         workflowName={current?.name ?? '未命名工作流'}
         onWorkflowNameChange={(name) => current && handleRename(current.id, name)}
         onSave={() => triggerSave()}
-        onRun={runWithEditorInputs}
+        onRun={runCurrentWorkflow}
         hasWorkflow={!!current?.id}
         saving={saving}
         running={runPolling}
@@ -349,17 +357,42 @@ export default function App() {
           </div>
         </CollapsibleSidePanel>
 
-        {/* 中间：画布 */}
+        {/* 中间：无工作流时仅引导新建，有工作流时显示画布 */}
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <WorkflowEditor
-            key={current?.id ?? 'new'}
-            workflowId={current?.id ?? null}
-            initialGraph={current ? (current.graph as WorkflowGraph) : null}
-            onSave={handleSave}
-            onRun={current ? runWithEditorInputs : undefined}
-            triggerSaveToken={saveTriggerToken}
-            onSavingChange={setSaving}
-          />
+          {!current ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-6 bg-muted/20 p-8">
+              <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
+                <Plus className="h-10 w-10" strokeWidth={1.5} />
+              </div>
+              <div className="text-center space-y-1">
+                <p className="text-lg font-semibold text-foreground">还没有打开工作流</p>
+                <p className="text-sm text-muted-foreground max-w-[280px]">
+                  请从左侧点击「新建工作流」开始，或选择已有工作流进行编辑
+                </p>
+              </div>
+              <Button
+                type="button"
+                size="lg"
+                className="h-11 rounded-lg bg-[var(--primary)] px-6 font-semibold text-white hover:bg-[var(--primary-hover)]"
+                onClick={newWorkflow}
+              >
+                <Plus className="mr-2 h-5 w-5" />
+                新建工作流
+              </Button>
+            </div>
+          ) : (
+            <WorkflowEditor
+              key={current.id}
+              workflowId={current.id}
+              initialGraph={current.graph as WorkflowGraph}
+              onSave={handleSave}
+              onRun={runCurrentWorkflow}
+              triggerSaveToken={saveTriggerToken}
+              onSavingChange={setSaving}
+              executionNodeLogs={Array.isArray(nodeLogs) ? (nodeLogs as Array<{ nodeId: string; status: string }>) : null}
+              executionRunStatus={runStatus}
+            />
+          )}
         </main>
 
         {/* 右侧：可拖拽调整宽度的运行面板，默认 320px */}
@@ -492,14 +525,6 @@ export default function App() {
         </ResizablePanel>
       </div>
 
-      {/* 底部：可收起的运行输入区 */}
-      <BottomRunInput
-        value={runInputsText}
-        onChange={setRunInputsText}
-        onRun={runWithEditorInputs}
-        disabled={!current?.id}
-        running={runPolling}
-      />
     </div>
   );
 }

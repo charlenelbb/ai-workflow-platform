@@ -1,14 +1,17 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { GitBranch } from 'lucide-react';
-import { nodeBase, nodeSubtext } from './node-styles';
+import { nodeBase, nodeSubtext, getExecutionStatusClass, getExecutionStatusStyle, ExecutionStatusBadge } from './node-styles';
+import type { NodeExecutionStatus } from './node-styles';
 
 function ConditionIfNode({ data }: NodeProps) {
   const label = (data?.label as string) || '条件分支';
   const expression = (data?.expression as string) || '';
   const displayExpr = expression ? (expression.length > 20 ? expression.slice(0, 20) + '…' : expression) : '未配置';
+  const status = (data?.executionStatus as NodeExecutionStatus) ?? 'none';
   return (
-    <div className={`${nodeBase} min-w-[140px] bg-[#F7BA1E] text-white`}>
+    <div className={`${nodeBase} min-w-[140px] bg-[#F7BA1E] text-white ${getExecutionStatusClass(status)}`} style={getExecutionStatusStyle(status)}>
+      <ExecutionStatusBadge status={status} />
       <Handle type="target" position={Position.Top} id="in" className="!top-[-6px]" />
       <div className="flex items-center justify-center gap-1.5">
         <GitBranch className="h-4 w-4 shrink-0" strokeWidth={2} />

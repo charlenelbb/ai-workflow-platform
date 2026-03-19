@@ -51,8 +51,10 @@ export async function startRun(workflowId: string, inputs?: Record<string, unkno
   return res.json();
 }
 
-export async function getRun(runId: string) {
-  const res = await fetch(`${BASE}/runs/${runId}`);
+/** @param noCache 为 true 时加时间戳参数，避免拿到缓存的旧状态 */
+export async function getRun(runId: string, noCache = false) {
+  const url = noCache ? `${BASE}/runs/${runId}?_t=${Date.now()}` : `${BASE}/runs/${runId}`;
+  const res = await fetch(url, noCache ? { cache: 'no-store' } : undefined);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }

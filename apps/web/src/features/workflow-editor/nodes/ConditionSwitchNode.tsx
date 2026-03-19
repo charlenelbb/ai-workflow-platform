@@ -1,7 +1,8 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { GitCompare } from 'lucide-react';
-import { nodeBase, nodeSubtext } from './node-styles';
+import { nodeBase, nodeSubtext, getExecutionStatusClass, getExecutionStatusStyle, ExecutionStatusBadge } from './node-styles';
+import type { NodeExecutionStatus } from './node-styles';
 
 function ConditionSwitchNode({ data }: NodeProps) {
   const label = (data?.label as string) || '多分支';
@@ -12,8 +13,10 @@ function ConditionSwitchNode({ data }: NodeProps) {
   const caseOutputs = cases.map((c) => c.outputKey).filter(Boolean);
   const outputs = caseOutputs.length > 0 ? [...new Set([...caseOutputs, defaultKey])] : [defaultKey];
   const n = Math.max(outputs.length, 1);
+  const status = (data?.executionStatus as NodeExecutionStatus) ?? 'none';
   return (
-    <div className={`${nodeBase} min-w-[140px] bg-[#722ED1] text-white`}>
+    <div className={`${nodeBase} min-w-[140px] bg-[#722ED1] text-white ${getExecutionStatusClass(status)}`} style={getExecutionStatusStyle(status)}>
+      <ExecutionStatusBadge status={status} />
       <Handle type="target" position={Position.Top} id="in" className="!top-[-6px]" />
       <div className="flex items-center justify-center gap-1.5">
         <GitCompare className="h-4 w-4 shrink-0" strokeWidth={2} />

@@ -147,26 +147,26 @@ export function TopNavBar({
             <span className="hidden sm:inline">{saving ? '保存中…' : '保存'}</span>
           </Button>
         )}
-        <Button type="button" size="sm" variant="outline" className={actionBtnClass} disabled>
+        <Button type="button" size="sm" variant="outline" className={actionBtnClass} disabled={!hasWorkflow} title="导出（待实现）">
           <Download className="h-3.5 w-3.5" />
           <span className="hidden sm:inline">导出</span>
         </Button>
-        <Button type="button" size="sm" variant="outline" className={actionBtnClass} disabled>
+        <Button type="button" size="sm" variant="outline" className={actionBtnClass} disabled={!hasWorkflow} title="分享（待实现）">
           <Share2 className="h-3.5 w-3.5" />
           <span className="hidden sm:inline">分享</span>
         </Button>
-        <Button type="button" size="sm" variant="outline" className={actionBtnClass} disabled>
+        <Button type="button" size="sm" variant="outline" className={actionBtnClass} disabled={!hasWorkflow} title="全屏（待实现）">
           <Maximize2 className="h-3.5 w-3.5" />
           <span className="hidden sm:inline">全屏</span>
         </Button>
-        <Button type="button" size="sm" variant="outline" className={actionBtnClass} disabled>
+        <Button type="button" size="sm" variant="outline" className={actionBtnClass} disabled={!hasWorkflow} title="对齐（待实现）">
           <AlignCenter className="h-3.5 w-3.5" />
           <span className="hidden sm:inline">对齐</span>
         </Button>
-        <Button type="button" size="sm" variant="outline" className={actionBtnClass} disabled>
+        <Button type="button" size="sm" variant="outline" className={actionBtnClass} disabled={!hasWorkflow} title="撤销（待实现）">
           <Undo2 className="h-3.5 w-3.5" />
         </Button>
-        <Button type="button" size="sm" variant="outline" className={actionBtnClass} disabled>
+        <Button type="button" size="sm" variant="outline" className={actionBtnClass} disabled={!hasWorkflow} title="重做（待实现）">
           <Redo2 className="h-3.5 w-3.5" />
         </Button>
       </div>

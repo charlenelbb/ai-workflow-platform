@@ -34,10 +34,20 @@ import { Button } from '@/components/ui/button';
 import type { NodeType, WorkflowGraph } from '@/types/workflow';
 
 const initialNodes: Node[] = [
-  { id: 'start', type: 'start', position: { x: 250, y: 0 }, data: {} },
-  { id: 'end', type: 'end', position: { x: 250, y: 300 }, data: {} },
+  {
+    id: 'input-default',
+    type: 'input',
+    position: { x: 250, y: 0 },
+    data: { label: '输入', assignments: { message: '' } },
+  },
+  {
+    id: 'output-default',
+    type: 'output',
+    position: { x: 250, y: 200 },
+    data: { label: '输出', outputMapping: { result: '{{input-default.message}}' } },
+  },
 ];
-const initialEdges: Edge[] = [{ id: 'e-start-end', source: 'start', target: 'end' }];
+const initialEdges: Edge[] = [{ id: 'e1', source: 'input-default', target: 'output-default' }];
 
 function graphToFlow(graph: WorkflowGraph | null): { nodes: Node[]; edges: Edge[] } {
   if (!graph?.nodes?.length) return { nodes: initialNodes, edges: initialEdges };
@@ -79,6 +89,8 @@ function flowToGraph(nodes: Node[], edges: Edge[]): WorkflowGraph {
   };
 }
 
+type NodeExecutionStatus = 'none' | 'success' | 'failed' | 'running';
+
 interface WorkflowEditorProps {
   workflowId: string | null;
   initialGraph: WorkflowGraph | null;
@@ -87,6 +99,10 @@ interface WorkflowEditorProps {
   /** 外部触发保存时递增此值（如 TopNavBar 点击保存） */
   triggerSaveToken?: number;
   onSavingChange?: (v: boolean) => void;
+  /** 当前 run 的节点日志，用于在节点上展示执行状态 */
+  executionNodeLogs?: Array<{ nodeId: string; status: string }> | null;
+  /** 当前 run 的状态：pending | running | success | failed */
+  executionRunStatus?: string | null;
 }
 
 export function WorkflowEditor({
@@ -95,11 +111,38 @@ export function WorkflowEditor({
   onSave,
   triggerSaveToken = 0,
   onSavingChange,
+  executionNodeLogs,
+  executionRunStatus,
 }: WorkflowEditorProps) {
   const { nodes: initN, edges: initE } = graphToFlow(initialGraph);
   const [nodes, setNodes, onNodesChange] = useNodesState(initN);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initE);
   const [, setSavingInternal] = useState(false);
+
+  useEffect(() => {
+    const logs = Array.isArray(executionNodeLogs) ? executionNodeLogs : [];
+    const isRunning = executionRunStatus === 'pending' || executionRunStatus === 'running';
+    const loggedIds = new Set(logs.map((l: { nodeId: string }) => l.nodeId));
+    const map: Record<string, NodeExecutionStatus> = {};
+    for (const l of logs as Array<{ nodeId: string; status: string }>) {
+      map[l.nodeId] = l.status === 'success' ? 'success' : 'failed';
+    }
+    if (isRunning && edges.length > 0) {
+      for (const e of edges) {
+        const edge = e as { source?: string; target?: string };
+        if (edge.source && edge.target && loggedIds.has(edge.source) && !loggedIds.has(edge.target) && !map[edge.target]) {
+          map[edge.target] = 'running';
+        }
+      }
+    }
+    setNodes((nds) =>
+      nds.map((n) => ({
+        ...n,
+        data: { ...n.data, executionStatus: map[n.id] ?? 'none' },
+      })),
+    );
+  }, [executionNodeLogs, executionRunStatus, edges, setNodes]);
+
   const setSaving = useCallback(
     (v: boolean) => {
       setSavingInternal(v);
@@ -136,6 +179,14 @@ export function WorkflowEditor({
     (type: 'start' | 'end' | 'plain' | 'ai' | 'input' | 'output' | 'http' | 'condition_if' | 'condition_switch') => {
       const id = `${type}-${Date.now()}`;
       const y = nodes.length * 120;
+      // AI 节点默认读取上游输入节点的第一个字段，便于「输入→AI→输出」链路直接可用
+      const inputNode = nodes.find((n) => n.type === 'input');
+      const inputFirstKey = inputNode
+        ? Object.keys(((inputNode.data?.assignments ?? {}) as Record<string, unknown>)).filter(Boolean)[0] || 'message'
+        : null;
+      const aiUserMapping =
+        inputNode && inputFirstKey ? `{{${inputNode.id}.${inputFirstKey}}}` : '{{inputs.message}}';
+
       const defaultData: Record<string, unknown> =
         type === 'plain'
           ? { label: '处理节点' }
@@ -145,18 +196,19 @@ export function WorkflowEditor({
                   provider: 'bailian',
                   model: 'qwen3.5-plus',
                   systemPrompt: '',
-                  inputMapping: { user: '{{inputs.message}}' },
+                  inputMapping: { user: aiUserMapping },
                 }
             : type === 'input'
               ? {
                   label: '输入',
-                  assignments: { message: '{{inputs.message}}' },
+                  assignments: { message: '' },
                 }
               : type === 'output'
-                ? {
-                    label: '输出',
-                    outputMapping: { result: '{{inputs.message}}' },
-                  }
+                ? (() => {
+                    const aiNode = nodes.find((n) => n.type === 'ai');
+                    const resultExpr = aiNode ? `{{${aiNode.id}.text}}` : '{{inputs.message}}';
+                    return { label: '输出', outputMapping: { result: resultExpr } };
+                  })()
             : type === 'http'
               ? {
                   label: 'HTTP',
@@ -192,7 +244,7 @@ export function WorkflowEditor({
         }),
       );
     },
-    [nodes.length, setNodes],
+    [nodes, setNodes],
   );
 
   const updateNodeData = useCallback((nodeId: string, data: Record<string, unknown>) => {
@@ -274,6 +326,7 @@ export function WorkflowEditor({
           <NodeConfigPanel
             node={selectedNode}
             nodes={nodes}
+            edges={edges}
             onUpdate={updateNodeData}
             onClose={() => setSelectedNodeId(null)}
           />
