@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Node, Edge } from '@xyflow/react';
 import {
   DropdownMenu,
@@ -648,11 +648,76 @@ export function NodeConfigPanel({ node, nodes, edges, onUpdate, onClose }: NodeC
   );
   const [condSwitchDefault, setCondSwitchDefault] = useState(condSwitchData.defaultOutput ?? '__default__');
 
+  const prevNodeIdRef = useRef<string | null>(null);
+
+  // 切换节点时：先把当前表单写回上一个节点（避免未点「应用」的编辑丢失），再同步为新节点的 data
+  const nodeId = node?.id;
+  useEffect(() => {
+    if (!node) return;
+
+    const prevId = prevNodeIdRef.current;
+    if (prevId != null && prevId !== nodeId && onUpdate) {
+      const prevNode = nodes.find((n) => n.id === prevId);
+      if (prevNode) {
+        const prevData = (prevNode.data ?? {}) as Record<string, unknown>;
+        const type = (prevNode.type as string) || '';
+        if (type === 'ai') {
+          onUpdate(prevId, { ...prevData, label: label || 'AI 节点', model, systemPrompt, inputMapping: { user: userMapping } });
+        } else if (type === 'input') {
+          onUpdate(prevId, { ...prevData, label: label || '输入', assignments: rowsToObject(assignmentRows) as Record<string, unknown> });
+        } else if (type === 'output') {
+          onUpdate(prevId, { ...prevData, label: label || '输出', outputMapping: rowsToObject(outputRows) as Record<string, unknown> });
+        } else if (type === 'http') {
+          onUpdate(prevId, {
+            ...prevData,
+            label: label || 'HTTP',
+            method: httpMethod,
+            url: httpUrl,
+            headers: rowsToObject(httpHeaderRows) as Record<string, string>,
+            body: httpBody || undefined,
+          });
+        } else if (type === 'condition_if') {
+          onUpdate(prevId, { ...prevData, label: label || '条件分支', expression: condIfExpression, trueOutput: 'true', falseOutput: 'false' });
+        } else if (type === 'condition_switch') {
+          const cases = condSwitchCases.map((c) => ({ value: c.value, outputKey: c.outputKey }));
+          onUpdate(prevId, { ...prevData, label: label || '多分支', variable: condSwitchVariable, cases, defaultOutput: condSwitchDefault });
+        } else {
+          onUpdate(prevId, { ...prevData, label });
+        }
+      }
+    }
+    prevNodeIdRef.current = nodeId ?? null;
+
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    setLabel((data.label as string) ?? '');
+    setModel((data.model as string) ?? (data.provider === 'bailian' ? 'qwen3.5-plus' : 'gpt-3.5-turbo'));
+    setSystemPrompt((data.systemPrompt as string) ?? '');
+    setUserMapping((data.inputMapping as Record<string, string>)?.user ?? (data.inputMapping as Record<string, string>)?.content ?? '');
+    setAssignmentRows(objectToRows((data.assignments ?? { message: '' }) as Record<string, unknown>));
+    setOutputRows(objectToRows((data.outputMapping ?? { result: '{{inputs.message}}' }) as Record<string, unknown>));
+    setHttpMethod((data.method as string) ?? 'GET');
+    setHttpUrl((data.url as string) ?? 'https://api.example.com');
+    setHttpHeaderRows(objectToRows((data.headers ?? {}) as Record<string, unknown>));
+    setHttpBody((data.body as string) ?? '');
+    setCondIfExpression((data.expression as string) ?? '{{inputs.score}} > 60');
+    setCondSwitchVariable((data.variable as string) ?? '{{inputs.type}}');
+    const cases = (data.cases as Array<{ value?: string; outputKey?: string }>) ?? [
+      { value: 'a', outputKey: 'a' },
+      { value: 'b', outputKey: 'b' },
+    ];
+    setCondSwitchCases(cases.map((c, i) => ({
+      value: c.value ?? '',
+      outputKey: c.outputKey ?? `case${i}`,
+      id: `case-${i}`,
+    })));
+    setCondSwitchDefault((data.defaultOutput as string) ?? '__default__');
+  // 仅依赖 nodeId/nodes/onUpdate；表单状态在切换瞬间仍为上一条节点的值，用于写回上一节点
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeId, nodes, onUpdate]);
+
   const refUserMapping = useRef<HTMLInputElement>(null);
   const savedUserMappingSelection = useRef<{ start: number; end: number } | null>(null);
   const userMappingCaretRef = useRef<number>(userMapping.length);
-
-  // 之前用于 textarea 选区插入的函数已不再需要（改为逐行 KV + TokenInput）。
 
   const variableGroups = useMemo(
     () => (node && nodes.length ? buildGlobalVariableGroups(nodes, edges, node.id) : []),
