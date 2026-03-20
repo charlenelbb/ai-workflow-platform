@@ -8,6 +8,7 @@ import {
   createWorkflow,
   updateWorkflow,
   deleteWorkflow,
+  publishWorkflow,
   startRun,
   getRun,
   getRunsByWorkflow,
@@ -21,6 +22,7 @@ import {
   ResizablePanel,
   NodeCard,
   WorkflowListRow,
+  PublishShareSheet,
 } from '@/components/layout';
 import { Button } from '@/components/ui/button';
 import { CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -61,6 +63,20 @@ export default function App() {
   const [editingName, setEditingName] = useState('');
   const [saveTriggerToken, setSaveTriggerToken] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  /** workflowId -> 对外 appId（发布成功后写入，并持久化 localStorage） */
+  const [appIdByWorkflowId, setAppIdByWorkflowId] = useState<Record<string, string>>(() => {
+    try {
+      const raw = localStorage.getItem('ai-workflow-published-app-ids');
+      return raw ? (JSON.parse(raw) as Record<string, string>) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [publishSheet, setPublishSheet] = useState<{
+    appId: string;
+    embedApiKey?: string;
+  } | null>(null);
 
   const loadList = useCallback(async () => {
     try {
@@ -263,6 +279,40 @@ export default function App() {
     setSaveTriggerToken((t) => t + 1);
   }, []);
 
+  const handlePublish = useCallback(async () => {
+    if (!current) return;
+    setUiError(null);
+    triggerSave();
+    await new Promise((r) => setTimeout(r, 450));
+    setPublishing(true);
+    try {
+      const { appId, apiKey: embedApiKey } = await publishWorkflow(current.id);
+      setAppIdByWorkflowId((prev) => {
+        const next = { ...prev, [current.id]: appId };
+        try {
+          localStorage.setItem('ai-workflow-published-app-ids', JSON.stringify(next));
+        } catch {
+          /* ignore */
+        }
+        return next;
+      });
+      const w = await getWorkflow(current.id);
+      setCurrent(w);
+      setPublishSheet({ appId, embedApiKey });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setUiError(`发布失败：${msg}`);
+    } finally {
+      setPublishing(false);
+    }
+  }, [current, triggerSave]);
+
+  const openPublishSheet = useCallback(() => {
+    if (!current?.id) return;
+    const appId = appIdByWorkflowId[current.id];
+    if (appId) setPublishSheet({ appId });
+  }, [current?.id, appIdByWorkflowId]);
+
   const nodeLogs =
     runResult && typeof runResult === 'object' && runResult != null && 'nodeLogs' in runResult
       ? ((runResult as { nodeLogs?: unknown }).nodeLogs as unknown)
@@ -296,10 +346,25 @@ export default function App() {
         onWorkflowNameChange={(name) => current && handleRename(current.id, name)}
         onSave={() => triggerSave()}
         onRun={runCurrentWorkflow}
+        onPublish={handlePublish}
+        publishing={publishing}
+        publishedAppId={current?.id ? appIdByWorkflowId[current.id] ?? null : null}
+        onOpenPublishSheet={openPublishSheet}
         hasWorkflow={!!current?.id}
         saving={saving}
         running={runPolling}
       />
+
+      <AnimatePresence mode="wait">
+        {publishSheet ? (
+          <PublishShareSheet
+            key={`${publishSheet.appId}:${publishSheet.embedApiKey ?? ''}`}
+            appId={publishSheet.appId}
+            embedApiKey={publishSheet.embedApiKey}
+            onClose={() => setPublishSheet(null)}
+          />
+        ) : null}
+      </AnimatePresence>
 
       <div className="flex flex-1 min-h-0">
         {/* 左侧：可折叠工作流列表 */}

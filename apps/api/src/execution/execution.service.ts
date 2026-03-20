@@ -116,6 +116,92 @@ export class ExecutionService {
     }
   }
 
+  /**
+   * 直接用发布快照执行（不从 workflow.graph 读取）。
+   * 用于“运行已发布工作流”：ExecutionService 只关心 graph + inputs + 落库 RunRecord。
+   */
+  async executeSnapshot(
+    workflowId: string,
+    workflowVersion: number,
+    graph: WorkflowGraph,
+    inputs: Record<string, unknown> = {},
+  ): Promise<{
+    runId: string;
+    status: 'success' | 'failed';
+    outputs: Record<string, unknown>;
+    nodeLogs: unknown;
+    error?: string;
+  }> {
+    const run = await this.prisma.runRecord.create({
+      data: {
+        workflowId,
+        workflowVersion,
+        status: 'pending',
+        inputs: inputs as object,
+        startedAt: new Date(),
+      },
+    });
+
+    const nodeLogs: NodeLogEntry[] = [];
+    await this.prisma.runRecord.update({
+      where: { id: run.id },
+      data: { status: 'running' },
+    });
+
+    try {
+      const { nodeOutputs, explicitOutputs } = await this.executeGraph(graph, inputs, nodeLogs, run.id);
+      const outputs =
+        explicitOutputs && Object.keys(explicitOutputs).length > 0
+          ? explicitOutputs
+          : this.collectOutputs(graph, nodeOutputs);
+
+      const logsForDb = nodeLogs.map((l) => ({
+        nodeId: l.nodeId,
+        startedAt: l.startedAt.toISOString(),
+        finishedAt: l.finishedAt?.toISOString(),
+        status: l.status,
+        input: l.input as object | undefined,
+        output: l.output as object | undefined,
+        error: l.error,
+      }));
+
+      await this.prisma.runRecord.update({
+        where: { id: run.id },
+        data: {
+          status: 'success',
+          outputs: outputs as object,
+          nodeLogs: logsForDb as object,
+          finishedAt: new Date(),
+        },
+      });
+
+      return { runId: run.id, status: 'success', outputs, nodeLogs: logsForDb };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const logsForDb = nodeLogs.map((l) => ({
+        nodeId: l.nodeId,
+        startedAt: l.startedAt.toISOString(),
+        finishedAt: l.finishedAt?.toISOString(),
+        status: l.status,
+        input: l.input as object | undefined,
+        output: l.output as object | undefined,
+        error: l.error,
+      }));
+
+      await this.prisma.runRecord.update({
+        where: { id: run.id },
+        data: {
+          status: 'failed',
+          error: message,
+          nodeLogs: logsForDb as object,
+          finishedAt: new Date(),
+        },
+      });
+
+      return { runId: run.id, status: 'failed', outputs: {}, nodeLogs: logsForDb, error: message };
+    }
+  }
+
   /** Worker 调用：执行指定 run 并更新 DB */
   async executeRunJob(runId: string): Promise<void> {
     const run = await this.prisma.runRecord.findUnique({

@@ -41,6 +41,15 @@ export async function deleteWorkflow(id: string): Promise<void> {
   if (!res.ok) throw new Error(await res.text());
 }
 
+/** 发布当前工作流到 App；若服务端配置了自动生成嵌入密钥，会多返回一次性的 apiKey */
+export async function publishWorkflow(workflowId: string): Promise<{ appId: string; apiKey?: string }> {
+  const res = await fetch(`${BASE}/workflows/${encodeURIComponent(workflowId)}/publish`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 export async function startRun(workflowId: string, inputs?: Record<string, unknown>) {
   const res = await fetch(`${BASE}/runs`, {
     method: 'POST',
@@ -65,6 +74,32 @@ export async function getRunsByWorkflow(workflowId: string, limit = 20) {
   return res.json();
 }
 
+/** 调用已发布应用（需 Bearer API Key） */
+export interface PublishedAppRunResult {
+  runId: string;
+  status: 'success' | 'failed';
+  outputs?: Record<string, unknown>;
+  nodeLogs?: unknown;
+  error?: string;
+}
+
+export async function runPublishedApp(
+  appId: string,
+  apiKey: string,
+  inputs: Record<string, unknown>,
+): Promise<PublishedAppRunResult> {
+  const res = await fetch(`${BASE}/apps/${encodeURIComponent(appId)}/run`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({ inputs }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 // 类型占位，与后端返回结构一致
 export interface WorkflowListItem {
   id: string;
@@ -79,6 +114,8 @@ export interface WorkflowDetail {
   name: string;
   description?: string | null;
   version: number;
+  /** 后端 draft | published */
+  status?: string;
   graph: { nodes: unknown[]; edges: unknown[] };
   createdAt: string;
   updatedAt: string;

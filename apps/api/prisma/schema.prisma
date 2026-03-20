@@ -7,20 +7,77 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ========== 工作流（编辑态） ==========
+// 状态：draft（编辑中）| published（已发布过，当前编辑仍为 draft）
 model Workflow {
   id          String   @id @default(cuid())
   name        String
   description String?
   projectId   String?
-  version     Int      @default(1)
+  version     Int      @default(1) // 编辑版本号，保存时可选递增
+  status      String   @default("draft") // draft | published
   graph       Json     // { nodes, edges, viewport }
   variables   Json?    // WorkflowVariable[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  runs RunRecord[]
+  runs     RunRecord[]
+  versions WorkflowVersion[]
+  apps     App[]
+
+  @@index([status])
 }
 
+// ========== 工作流发布版本 ==========
+// 每次发布生成一条，存快照，供 App 固定引用
+model WorkflowVersion {
+  id          String   @id @default(cuid())
+  workflowId  String
+  version     Int      // 发布版本号 1, 2, 3...
+  snapshot    Json     // 发布时完整快照 { graph, variables, name, ... }
+  publishedAt DateTime @default(now())
+
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  apps     App[]
+
+  @@unique([workflowId, version])
+  @@index([workflowId])
+}
+
+// ========== 发布后的应用 ==========
+// 对应一个已发布版本，支持 API 调用与 Web 嵌入
+model App {
+  id                 String   @id @default(cuid())
+  appId              String   @unique // 对外唯一标识，用于 API 路径 / 嵌入
+  name               String
+  workflowId         String
+  workflowVersionId  String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  workflow        Workflow        @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  workflowVersion WorkflowVersion @relation(fields: [workflowVersionId], references: [id], onDelete: Restrict)
+  apiKeys          ApiKey[]
+
+  @@index([workflowId])
+}
+
+// ========== App API 密钥 ==========
+// 用于鉴权 API 调用；密钥明文只展示一次，存储哈希
+model ApiKey {
+  id         String    @id @default(cuid())
+  appId      String
+  keyHash    String    // 存储哈希（如 SHA-256），不存明文
+  name       String?   // 用户命名，便于管理
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  app App @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  @@index([appId])
+}
+
+// ========== 运行记录（保留原有，可关联到 workflow 或 app） ==========
 model RunRecord {
   id               String   @id @default(cuid())
   workflowId       String
@@ -34,4 +91,6 @@ model RunRecord {
   nodeLogs         Json?    // NodeRunLog[]
 
   workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([workflowId])
 }

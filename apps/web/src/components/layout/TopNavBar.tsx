@@ -9,6 +9,8 @@ import {
   Save,
   Download,
   Share2,
+  Rocket,
+  Link2,
   Maximize2,
   AlignCenter,
   Undo2,
@@ -33,6 +35,12 @@ interface TopNavBarProps {
   onWorkflowNameChange?: (name: string) => void;
   onSave?: () => void;
   onRun?: () => void;
+  /** 发布当前工作流（服务器已保存版本） */
+  onPublish?: () => void;
+  publishing?: boolean;
+  /** 当前工作流已发布时的对外 appId，用于打开「发布信息」 */
+  publishedAppId?: string | null;
+  onOpenPublishSheet?: () => void;
   saving?: boolean;
   running?: boolean;
   /** 是否有选中的工作流（用于禁用保存/运行） */
@@ -45,6 +53,10 @@ export function TopNavBar({
   onWorkflowNameChange,
   onSave,
   onRun,
+  onPublish,
+  publishing = false,
+  publishedAppId = null,
+  onOpenPublishSheet,
   saving = false,
   running = false,
   hasWorkflow = false,
@@ -145,6 +157,35 @@ export function TopNavBar({
           >
             <Save className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">{saving ? '保存中…' : '保存'}</span>
+          </Button>
+        )}
+        {onPublish && (
+          <Button
+            type="button"
+            size="sm"
+            className={cn(
+              actionBtnClass,
+              'border-[var(--primary)]/40 bg-[var(--accent)]/80 text-[var(--primary)] hover:bg-[var(--accent)]',
+            )}
+            onClick={onPublish}
+            disabled={!hasWorkflow || publishing || saving}
+            title="将当前已保存到服务器的工作流发布为 App"
+          >
+            <Rocket className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">{publishing ? '发布中…' : '发布'}</span>
+          </Button>
+        )}
+        {publishedAppId && onOpenPublishSheet && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className={actionBtnClass}
+            onClick={onOpenPublishSheet}
+            title="查看嵌入链接与 API"
+          >
+            <Link2 className="h-3.5 w-3.5" />
+            <span className="hidden lg:inline">发布信息</span>
           </Button>
         )}
         <Button type="button" size="sm" variant="outline" className={actionBtnClass} disabled={!hasWorkflow} title="导出（待实现）">
