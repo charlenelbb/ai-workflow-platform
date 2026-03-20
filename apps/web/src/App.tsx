@@ -36,16 +36,34 @@ const defaultGraph: WorkflowGraph = {
       id: 'input-default',
       type: 'input',
       position: { x: 250, y: 0 },
-      data: { label: '输入', assignments: { message: '' } },
+      data: { label: '输入', assignments: { message: '{{inputs.query}}' } },
+    },
+    {
+      id: 'ai-default',
+      type: 'ai',
+      position: { x: 250, y: 140 },
+      data: {
+        label: 'AI',
+        provider: 'bailian',
+        model: 'qwen3.5-plus',
+        systemPrompt: '你是乐于助人的助手。请结合历史对话理解用户意图并作答。',
+        inputMapping: { user: '{{input-default.message}}' },
+      },
     },
     {
       id: 'output-default',
       type: 'output',
-      position: { x: 250, y: 200 },
-      data: { label: '输出', outputMapping: { result: '{{input-default.message}}' } },
+      position: { x: 250, y: 280 },
+      data: {
+        label: '输出',
+        outputMapping: { reply: '{{ai-default.text}}', result: '{{ai-default.text}}' },
+      },
     },
   ],
-  edges: [{ id: 'e1', source: 'input-default', target: 'output-default' }],
+  edges: [
+    { id: 'e1', source: 'input-default', target: 'ai-default' },
+    { id: 'e2', source: 'ai-default', target: 'output-default' },
+  ],
 };
 
 export default function App() {

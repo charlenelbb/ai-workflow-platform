@@ -498,7 +498,12 @@ export class ExecutionService {
               context,
             ),
           );
-          const messages = [{ role: 'user' as const, content: userContent }];
+          /** 多轮对话：来自运行入参 conversationHistory / messages（嵌入页、API 传入） */
+          const history = this.normalizeConversationHistory(initialInputs);
+          const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [
+            ...history,
+            { role: 'user' as const, content: userContent },
+          ];
           const text = await this.aiService.complete(provider, messages, {
             model,
             systemPrompt,
@@ -645,6 +650,32 @@ export class ExecutionService {
       v = (v as Record<string, unknown>)[k];
     }
     return v;
+  }
+
+  /**
+   * 从本次运行 inputs 中读取多轮对话历史（user/assistant），供 AI 节点拼进 LLM messages。
+   * 约定：`conversationHistory` 或 `messages`: `{ role, content }[]`；仅保留 user/assistant，截断避免超长。
+   */
+  private normalizeConversationHistory(
+    initialInputs: Record<string, unknown>,
+    maxMessages = 48,
+  ): Array<{ role: 'user' | 'assistant'; content: string }> {
+    const raw = initialInputs['conversationHistory'] ?? initialInputs['messages'];
+    if (!Array.isArray(raw)) return [];
+    const out: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+    for (const item of raw) {
+      if (!item || typeof item !== 'object') continue;
+      const o = item as Record<string, unknown>;
+      const role = o.role;
+      if (role !== 'user' && role !== 'assistant') continue;
+      const content = o.content;
+      if (typeof content !== 'string') continue;
+      const c = content.trim();
+      if (!c) continue;
+      out.push({ role, content: c });
+    }
+    if (out.length <= maxMessages) return out;
+    return out.slice(out.length - maxMessages);
   }
 
   /**

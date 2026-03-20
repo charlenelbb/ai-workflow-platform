@@ -259,3 +259,62 @@
   box-shadow: var(--shadow-card);
   border: 1px solid var(--border);
 }
+
+/* 嵌入页：AI loading 圆点跳动（不依赖 JS 动画库） */
+@keyframes embed-ai-dot {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  40% {
+    transform: translateY(-7px);
+    opacity: 1;
+  }
+}
+.embed-ai-loading-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--primary);
+  animation: embed-ai-dot 0.7s ease-in-out infinite;
+  vertical-align: middle;
+}
+@keyframes embed-ai-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(380%);
+  }
+}
+.embed-ai-loading-bar {
+  position: relative;
+  height: 4px;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--muted);
+}
+.embed-ai-loading-bar::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 32%;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--primary) 70%, transparent);
+  animation: embed-ai-sweep 1.05s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .embed-ai-loading-dot,
+  .embed-ai-loading-bar::before {
+    animation: none;
+  }
+  .embed-ai-loading-dot {
+    opacity: 0.85;
+  }
+}

@@ -159,3 +159,10 @@ curl -sS -X POST "http://localhost:3001/apps/<appId>/api-keys" \
 
 - **控制台「运行」**：用当前 Workflow.graph 执行（draft）。
 - **App API / 嵌入**：用 App.workflowVersion.snapshot.graph 执行，保证发布版本不变。
+
+## 7. 嵌入多轮对话（输入 + AI + 输出）
+
+- 嵌入页每次请求除当前句（如 `inputs.query`）外，会附带 **`conversationHistory`**：`{ role: 'user' | 'assistant', content: string }[]`（不含本轮用户句；本轮仅通过输入节点映射进图）。
+- 执行引擎在 **AI 节点**内将 `conversationHistory`（或别名 **`messages`**）与本轮用户内容合并为 LLM 的 **多条 messages**，因此模型能看到历史。
+- **编排建议**：输入节点把当前句映射为 `{{inputs.query}}`（或你用 URL 指定的 `inputField`）；AI 节点 `inputMapping.user`（或 `content`）引用输入节点输出（如 `{{input-xxx.message}}`）；**systemPrompt** 写角色与指令。
+- 直接调 `POST /api/apps/:appId/run` 时也可自行传入 **`conversationHistory`** 实现多轮。

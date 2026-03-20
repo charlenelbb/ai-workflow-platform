@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Send, KeyRound } from 'lucide-react';
+import { Send, KeyRound, Loader2 } from 'lucide-react';
 import { runPublishedApp, type PublishedAppRunResult } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
+import { ChatMarkdown } from '@/features/embed/ChatMarkdown';
+
+/** 距底部小于此值视为「在底部」，恢复自动滚动 */
+const STICK_THRESHOLD_PX = 72;
 
 type ChatRole = 'user' | 'assistant' | 'system';
 
@@ -16,7 +19,74 @@ interface ChatMessage {
   role: ChatRole;
   text: string;
   raw?: unknown;
+  typewriter?: boolean;
 }
+
+function TypewriterText({
+  text,
+  onTick,
+  className,
+}: {
+  text: string;
+  onTick?: () => void;
+  className?: string;
+}) {
+  const [shown, setShown] = useState('');
+  const tickRef = useRef(onTick);
+  tickRef.current = onTick;
+
+  useEffect(() => {
+    if (!text) {
+      setShown('');
+      return;
+    }
+    let i = 0;
+    const len = text.length;
+    const chunk = len > 2000 ? 6 : len > 800 ? 4 : len > 200 ? 3 : 2;
+    const intervalMs = 18;
+    setShown('');
+    if (len === 0) return;
+    const id = window.setInterval(() => {
+      i = Math.min(len, i + chunk);
+      setShown(text.slice(0, i));
+      tickRef.current?.();
+      if (i >= len) {
+        window.clearInterval(id);
+      }
+    }, intervalMs);
+    return () => window.clearInterval(id);
+  }, [text]);
+
+  return (
+    <div className={cn('min-w-0 break-words', className)}>
+      <ChatMarkdown content={shown} />
+      {shown.length < text.length ? (
+        <span className="ml-0.5 inline-block h-3 w-1.5 animate-pulse rounded-sm bg-[var(--primary)] align-middle opacity-80" />
+      ) : null}
+    </div>
+  );
+}
+
+function AiLoadingBubble() {
+  return (
+    <div className="flex max-w-[85%] items-center gap-3 rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 text-sm shadow-[var(--shadow-sm)]">
+      <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[var(--primary)]" aria-hidden />
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-foreground/90">AI 正在思考</span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="embed-ai-loading-dot" style={{ animationDelay: '0ms' }} />
+            <span className="embed-ai-loading-dot" style={{ animationDelay: '140ms' }} />
+            <span className="embed-ai-loading-dot" style={{ animationDelay: '280ms' }} />
+          </span>
+        </div>
+        <div className="embed-ai-loading-bar" aria-hidden />
+      </div>
+    </div>
+  );
+}
+
+const MAX_CONVERSATION_HISTORY_MESSAGES = 40;
 
 function formatOutputsForChat(outputs: unknown): string {
   if (outputs == null) return '（无输出）';
@@ -55,15 +125,41 @@ export function AppEmbedPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
+
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  /** 为 true 时：新消息、打字机、loading 会滚动到底部 */
+  const stickToBottomRef = useRef(true);
+  const ignoreScrollUntilRef = useRef(0);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    ignoreScrollUntilRef.current = Date.now() + 150;
+    el.scrollTo({ top: el.scrollHeight, behavior });
+  }, []);
+
+  const updateStickFromScroll = useCallback(() => {
+    if (Date.now() < ignoreScrollUntilRef.current) return;
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottomRef.current = distance <= STICK_THRESHOLD_PX;
+  }, []);
 
   useEffect(() => {
     if (keyFromUrl) setApiKey(keyFromUrl);
   }, [keyFromUrl]);
 
+  /** 新消息或进入 loading 时，若在底部则跟到底 */
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, sending]);
+    if (!stickToBottomRef.current) return;
+    const id = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        scrollToBottom(sending ? 'auto' : 'smooth');
+      });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [messages, sending, scrollToBottom]);
 
   const appendMessage = useCallback((msg: ChatMessage) => {
     setMessages((prev) => [...prev, msg]);
@@ -79,11 +175,25 @@ export function AppEmbedPage() {
     }
     setErrorBanner(null);
     setDraft('');
+
+    stickToBottomRef.current = true;
+
+    const priorForApi = messages
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.text }));
+    const conversationHistory =
+      priorForApi.length > MAX_CONVERSATION_HISTORY_MESSAGES
+        ? priorForApi.slice(priorForApi.length - MAX_CONVERSATION_HISTORY_MESSAGES)
+        : priorForApi;
+
     appendMessage({ id: crypto.randomUUID(), role: 'user', text });
     setSending(true);
 
     try {
-      const inputs = { [inputField]: text };
+      const inputs: Record<string, unknown> = {
+        [inputField]: text,
+        ...(conversationHistory.length > 0 ? { conversationHistory } : {}),
+      };
       const result = (await runPublishedApp(appId, key, inputs)) as PublishedAppRunResult;
       if (result.status === 'failed') {
         const errText = result.error ?? '执行失败';
@@ -92,6 +202,7 @@ export function AppEmbedPage() {
           role: 'assistant',
           text: errText,
           raw: result,
+          typewriter: false,
         });
       } else {
         appendMessage({
@@ -99,6 +210,7 @@ export function AppEmbedPage() {
           role: 'assistant',
           text: formatOutputsForChat(result.outputs),
           raw: result,
+          typewriter: true,
         });
       }
     } catch (e) {
@@ -107,11 +219,12 @@ export function AppEmbedPage() {
         id: crypto.randomUUID(),
         role: 'assistant',
         text: `请求失败：${msg}`,
+        typewriter: false,
       });
     } finally {
       setSending(false);
     }
-  }, [appId, apiKey, draft, sending, inputField, appendMessage]);
+  }, [appId, apiKey, draft, sending, inputField, appendMessage, messages]);
 
   const onKeyDownArea = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -119,6 +232,12 @@ export function AppEmbedPage() {
       void handleSend();
     }
   };
+
+  const onTypewriterTick = useCallback(() => {
+    if (stickToBottomRef.current) {
+      scrollToBottom('auto');
+    }
+  }, [scrollToBottom]);
 
   if (!appId) {
     return (
@@ -129,7 +248,7 @@ export function AppEmbedPage() {
   }
 
   return (
-    <div className="flex h-screen min-h-0 flex-col bg-background text-foreground">
+    <div className="flex h-[100dvh] min-h-0 flex-col bg-background text-foreground">
       <header className="shrink-0 border-b border-border bg-card px-4 py-3 shadow-[var(--shadow-sm)]">
         <div className="mx-auto flex max-w-3xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -165,13 +284,23 @@ export function AppEmbedPage() {
         )}
       </header>
 
-      <ScrollArea className="min-h-0 flex-1">
+      <div
+        ref={scrollContainerRef}
+        onScroll={updateStickFromScroll}
+        className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain"
+      >
         <div className="mx-auto flex max-w-3xl flex-col gap-3 px-4 py-4">
           {messages.length === 0 && (
             <div className="rounded-xl border border-dashed border-border bg-card/80 p-8 text-center text-sm text-muted-foreground">
-              在下方输入内容并发送，将调用已发布工作流（请求体字段「{inputField}」）。
+              在下方输入内容并发送；输入+AI+输出类工作流会<strong>带上历史对话</strong>，多轮提问时 AI 可结合上下文回答（字段「{inputField}」为当前句）。
               <br />
-              <span className="text-xs">可用 URL 参数自定义：`?inputField=message`</span>
+              <span className="text-xs">
+                输入节点 assignments 建议使用 <code className="font-mono">{`{{inputs.${inputField}}}`}</code>{' '}
+                ；URL 可带 <code className="font-mono">?inputField=message</code>
+              </span>
+              <p className="mt-3 text-xs text-muted-foreground">
+                向上滚动查看历史时会<strong>暂停自动滚到底</strong>；滚回底部或再次发送后恢复。
+              </p>
             </div>
           )}
           {messages.map((m, i) => (
@@ -190,18 +319,25 @@ export function AppEmbedPage() {
                     : 'rounded-bl-md border border-border bg-card text-card-foreground',
                 )}
               >
-                <div className="whitespace-pre-wrap break-words">{m.text}</div>
+                {m.role === 'assistant' && m.typewriter !== false ? (
+                  <TypewriterText text={m.text} onTick={onTypewriterTick} />
+                ) : m.role === 'assistant' ? (
+                  <ChatMarkdown content={m.text} />
+                ) : (
+                  <div className="whitespace-pre-wrap break-words">{m.text}</div>
+                )}
               </div>
             </motion.div>
           ))}
           {sending && (
-            <div className="text-xs text-muted-foreground">思考中…</div>
+            <div className="flex justify-start">
+              <AiLoadingBubble />
+            </div>
           )}
-          <div ref={bottomRef} />
         </div>
-      </ScrollArea>
+      </div>
 
-      <footer className="shrink-0 border-t border-border bg-card p-4 shadow-[var(--shadow-sm)]">
+      <footer className="shrink-0 border-t border-border bg-card px-4 pt-3 shadow-[0_-4px_20px_rgba(0,0,0,0.05)] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))]">
         <div className="mx-auto flex max-w-3xl flex-col gap-2 sm:flex-row sm:items-end">
           <Textarea
             placeholder={`输入后按 Enter 发送（Shift+Enter 换行）…`}
@@ -210,7 +346,7 @@ export function AppEmbedPage() {
             onKeyDown={onKeyDownArea}
             rows={3}
             disabled={sending}
-            className="min-h-[80px] flex-1 resize-y rounded-xl border-border text-sm"
+            className="min-h-[80px] flex-1 resize-y rounded-xl border-border bg-background text-sm"
           />
           <Button
             type="button"
