@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
@@ -65,11 +65,18 @@ interface NodeLogEntry {
  */
 @Injectable()
 export class ExecutionService {
+  private readonly logger = new Logger(ExecutionService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly aiService: AiService,
     @InjectQueue('workflow-execution') private readonly executionQueue: Queue,
   ) {}
+
+  /** 设为 `1` 时在日志中输出各阶段耗时（排查 /apps/:appId/run 等同步执行慢） */
+  private logExecTiming(): boolean {
+    return process.env.LOG_EXEC_TIMING === '1';
+  }
 
   async startRun(workflowId: string, inputs: Record<string, unknown> = {}) {
     const workflow = await this.prisma.workflow.findUnique({
@@ -148,8 +155,12 @@ export class ExecutionService {
       data: { status: 'running' },
     });
 
+    const tGraph = Date.now();
     try {
       const { nodeOutputs, explicitOutputs } = await this.executeGraph(graph, inputs, nodeLogs, run.id);
+      if (this.logExecTiming()) {
+        this.logger.log(`executeSnapshot executeGraph=${Date.now() - tGraph}ms runId=${run.id}`);
+      }
       const outputs =
         explicitOutputs && Object.keys(explicitOutputs).length > 0
           ? explicitOutputs
@@ -504,12 +515,18 @@ export class ExecutionService {
             ...history,
             { role: 'user' as const, content: userContent },
           ];
+          const tLlm = Date.now();
           const text = await this.aiService.complete(provider, messages, {
             model,
             systemPrompt,
             maxRetries: 2,
             retryBackoffMs: 1000,
           });
+          if (this.logExecTiming()) {
+            this.logger.log(
+              `executeGraph ai node=${nodeId} llm=${Date.now() - tLlm}ms provider=${provider} model=${model} historyTurns=${history.length}`,
+            );
+          }
           const output = { text, content: text };
           nodeOutputs[nodeId] = { output };
           await pushLog({
